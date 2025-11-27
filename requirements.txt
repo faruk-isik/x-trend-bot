@@ -1,3 +1,4 @@
 tweepy
 flask
 gunicorn
+google-genai # Bu satırı ekleyin
