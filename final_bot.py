@@ -9,7 +9,6 @@ from google.genai.errors import APIError
 def get_v2_client():
     """X V2 API istemcisini oluşturur ve anahtarları ortam değişkenlerinden çeker."""
     try:
-        # Anahtarlar, Koyeb'deki Ortam Değişkenlerinden çekilir.
         client = tweepy.Client(
             consumer_key=os.environ.get('CONSUMER_KEY'),
             consumer_secret=os.environ.get('CONSUMER_SECRET'),
@@ -30,15 +29,14 @@ def generate_gemini_tweet():
     
     try:
         # 1. Gemini İstemcisini Oluşturma
-        # GEMINI_API_KEY değişkenini Koyeb'e eklediğinizden emin olun!
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
         # 2. Gemini'ya Gönderilecek İstek (Prompt)
         prompt = (
-            "Şu anki **Türkiye gündeminde en çok konuşulan konulardan** biri hakkında, "
+            "Şu anki Türkiye gündeminde en çok konuşulan konulardan biri hakkında, "
             "insanların dikkatini çekecek, pozitif ve bilgilendirici bir Twitter (X) gönderisi "
             "(maksimum 250 karakter) hazırla. "
-            "Konunun **güncel ve ilgi çekici** olduğunu belirt. Sonuna alakalı bir emoji ve bir hashtag ekle. "
+            "Konunun güncel ve ilgi çekici olduğunu belirt. Sonuna alakalı bir emoji ve bir hashtag ekle. "
             "Sadece tweet metnini döndür."
         )
         
@@ -71,8 +69,8 @@ def run_bot():
     tweet_text = generate_gemini_tweet()
     
     try:
-        saat = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M")
-        final_tweet_text = f"[{saat} UTC] {tweet_text}"
+        # ZAMAN DAMGASI KALDIRILDI. final_tweet_text sadece Gemini çıktısıdır.
+        final_tweet_text = tweet_text 
         
         # 280 karakter limitini aşmaması için kontrol
         if len(final_tweet_text) > 280:
@@ -85,7 +83,7 @@ def run_bot():
 
     except Exception as e:
         print(f"❌ V2 Tweet Atma Hatası: {e}")
-        raise # Hatanın Flask'a iletilmesini sağlar
+        raise 
 
 # --- Sunucu Yapısı (Dış Tetikleyici İçin Flask) ---
 app = Flask(__name__)
