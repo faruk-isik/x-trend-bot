@@ -35,9 +35,10 @@ def generate_gemini_tweet():
         prompt = (
             "Şu anki Türkiye gündeminde en çok konuşulan konulardan biri hakkında, "
             "insanların dikkatini çekecek, pozitif ve bilgilendirici bir Twitter (X) gönderisi "
-            "(maksimum 250 karakter) hazırla. "
+            "Maksimum 230 karakter olacak şekilde hazırla. "
             "Konunun güncel ve ilgi çekici olduğunu belirt. Sonuna alakalı bir emoji ve bir hashtag ekle. "
             "Sadece tweet metnini döndür."
+            "Tweeti Türkçe olacak şekilde oluştur."
         )
         
         # 3. İçerik Oluşturma ve Arama Aracını Ekleme (Grounding)
@@ -104,3 +105,4 @@ def trigger_tweet():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
