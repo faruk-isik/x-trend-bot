@@ -25,7 +25,7 @@ def get_v2_client():
 # --- Gemini'dan Güncel İçerik İsteme Fonksiyonu (Arama Entegre) ---
 def generate_gemini_tweet():
     """Gemini'dan Google Search aracılığıyla güncel bir trend hakkında içerik ister."""
-    fallback_text = "Yapay zeka güncel içerik alamadı, genel bir tweet atılıyor. #Gündem"
+    fallback_text = "Türkiye gündemini bizimle takip edin. #Gündem"
     
     try:
         # 1. Gemini İstemcisini Oluşturma
@@ -33,7 +33,7 @@ def generate_gemini_tweet():
         
         # 2. Gemini'ya Gönderilecek İstek (Prompt)
         prompt = (
-            "Şu anki tt listesinden bir tanesini seç ve onunla ilgili güncel haberleri tarayıp bir yazı yaz. Tt olan yazıyı da yazının sonuna koy. Maksimum 230 karakter olsun ve yazı türkçe olacak. Hashtag ve emoji olmayacak. Yazının içerisinde tt listesinden seçtiğin kelime ya da kelimeler de kullanılmalı."
+            "Şu anki tt listesinden bir tanesini seç ve onunla ilgili en güncel haberleri tarayıp ilgili bir yazı yaz. Tt olan yazıyı da yazının sonuna koy. Maksimum 230 karakter olsun ve yazı türkçe olacak. Hashtag ve emoji olmayacak. Yazının içerisinde tt listesinden seçtiğin kelime ya da kelimeler de kullanılmalı."
         )
         
         # 3. İçerik Oluşturma ve Arama Aracını Ekleme (Grounding)
@@ -100,5 +100,6 @@ def trigger_tweet():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
