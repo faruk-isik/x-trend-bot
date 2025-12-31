@@ -24,21 +24,30 @@ def generate_gemini_tweet():
     fallback_text = "Türkiye gündemindeki gelişmeleri takip ediyoruz."
     
     try:
-        # En güncel SDK istemcisi
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
-        prompt = (
-	        "Sana daha önce bahsettiğim kuralları unut. Şu an Türkiye gündeminde öne çıkan en güncel ve önemli haberi Google'dan ara. Daha önce kontrol ettiğin haberden farklı bir haber olsun."
-            "Bu haber hakkında bilgilendirici tweet metni yaz. "
-            "Kurallar: Türkçe, hashtagsiz, emojisiz, tarafsız. Maksimum 280 karakter. "
+        # SİSTEM TALİMATI: Modelin temel görev tanımı burasıdır.
+        system_rules = (
+            "Sen tarafsız bir haber aktarıcısısın. Önceki tüm etkileşimleri ve tarzları unut. "
+            "Görevin: Sadece güncel haber verisi sunmak. "
+            "KESİN KURALLAR: Türkçe yaz, ASLA hashtag kullanma, ASLA emoji kullanma, "
+            "tarafsız bir dil kullan ve metin 280 karakteri asla geçmesin."
         )
         
-        # Gemini 3 Flash modelini kullanıyoruz
+        # KULLANICI İSTEMİ: Spesifik görev.
+        user_prompt = (
+            "Google Search kullanarak şu an Türkiye gündemindeki en önemli haberi bul. "
+            "Bulduğun haberi, daha önce bahsettiğin konulardan farklı olacak şekilde, "
+            "bilgilendirici bir tweet metnine dönüştür."
+        )
+        
         response = client.models.generate_content(
-            model='gemini-3-flash-preview', 
-            contents=prompt,
+            model='gemini-2.0-flash', # En güncel kararlı sürümü kullanmanızı öneririm
+            contents=user_prompt,
             config=types.GenerateContentConfig(
+                system_instruction=system_rules, # Talimatları buraya taşıdık
                 tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0.7, # 0.7 daha güncel ve çeşitli sonuçlar sağlar
                 safety_settings=[
                     types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_ONLY_HIGH"),
                     types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_ONLY_HIGH")
@@ -80,4 +89,5 @@ def trigger():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
