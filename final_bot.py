@@ -29,16 +29,22 @@ def generate_gemini_tweet():
     try:
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
+        # SİSTEM TALİMATINI DAHA SERT VE ÖRNEKLİ HALE GETİRDİK
         system_rules = (
-            "Sen tarafsız bir haber aktarıcısısın. Önceki tüm tarzları unut. "
-            "Görevin: Sadece güncel haber verisi sunmak. "
-            "KESİN KURALLAR: Türkçe yaz, ASLA hashtag kullanma, ASLA emoji kullanma, "
-            "tarafsız bir dil kullan ve metin 280 karakteri asla geçmesin."
+            "Sen bir haber botusun. Sadece tek bir paragraf metin yazarsın. "
+            "ASLA başlık atma, ASLA kategori (Ekonomi, Haber vb.) ekleme. "
+            "ASLA hashtag (#) ve emoji kullanma. "
+            "Örnek Format: Türkiye Cumhuriyet Merkez Bankası bugün faiz kararını açıkladı. Politika faizi yüzde 50 seviyesinde sabit tutuldu. Karar metninde dezenflasyon vurgusu yapıldı."
         )
         
-        user_prompt = "Türkiye gündemindeki en güncel ve önemli haberi Google'dan ara ve özetle."
+        # Arama sorgusunu biraz daha spesifikleştirdik
+        user_prompt = (
+            "Google Search kullanarak şu an Türkiye'de gerçekleşen, "
+            "son 1 saat içindeki en güncel ve somut olayı bul. "
+            "Genel yıllık değerlendirme yapma, spesifik bir haber seç ve tweetle."
+        )
         
-        logging.info("--- Gemini Süreci Başladı ---")
+        logging.info("--- Gemini 2.0 Flash İşlemde ---")
         
         response = client.models.generate_content(
             model='gemini-2.0-flash', 
@@ -46,44 +52,25 @@ def generate_gemini_tweet():
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
-                temperature=0.7
+                temperature=0.3 # Yaratıcılığı düşürdük, kurallara daha sadık kalacak
             )
         )
-
-        # 1. Ham Yanıt Logu (Model ne üretti?)
+        
+        # Manuel Temizlik: Model hala inatla kategori eklerse onları temizleyelim
         if response.text:
-            logging.info(f"📝 Üretilen Tweet: {response.text.strip()}")
-        else:
-            logging.warning("⚠️ Model bir metin üretemedi.")
-
-        # 2. Google Search Logu (Hangi kaynaklara baktı?)
-        # Not: response.candidates[0].grounding_metadata üzerinden arama sorgularını görebiliriz.
-        try:
-            if response.candidates[0].grounding_metadata.search_entry_point:
-                queries = response.candidates[0].grounding_metadata.grounding_chunks
-                logging.info(f"🔍 Google Search Kaynak Sayısı: {len(queries)} kaynak tarandı.")
-        except Exception:
-            logging.info("ℹ️ Arama verisi detayları alınamadı (Model doğrudan bilgiyi kullanmış olabilir).")
-
-        return response.text.strip() if response.text else fallback_text
-
-    except Exception as e:
-        logging.error(f"❌ Gemini Hatası: {str(e)}")
+            text = response.text.strip()
+            # Eğer son satırda tek bir kelime kalmışsa (Ekonomi gibi), onu temizlemek için:
+            lines = text.split('\n')
+            if len(lines) > 1 and len(lines[-1].split()) == 1:
+                text = "\n".join(lines[:-1]).strip()
+            
+            return text
+        
         return fallback_text
 
-def run_bot():
-    logging.info("🤖 Bot tetiklendi, tweet hazırlanıyor...")
-    x_client = get_v2_client()
-    if not x_client: 
-        logging.error("❌ X Client başlatılamadı.")
-        return
-    
-    content = generate_gemini_tweet()
-    try:
-        x_client.create_tweet(text=content)
-        logging.info(f"✅ Tweet başarıyla gönderildi: {content}")
     except Exception as e:
-        logging.error(f"❌ Tweet gönderim hatası: {e}")
+        logging.error(f"❌ Hata: {str(e)}")
+        return fallback_text
 
 app = Flask(__name__)
 
@@ -95,6 +82,7 @@ def trigger():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
 
 
