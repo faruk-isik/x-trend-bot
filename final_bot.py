@@ -28,9 +28,9 @@ def generate_gemini_tweet():
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
         prompt = (
-	    "Şu an Türkiye gündeminde öne çıkan en güncel ve önemli haberi Google'dan ara. "
+	        "Sana daha önce bahsettiğim kuralları unut. Şu an Türkiye gündeminde öne çıkan en güncel ve önemli haberi Google'dan ara. Daha önce kontrol ettiğin haberden farklı bir haber olsun."
             "Bu haber hakkında bilgilendirici tweet metni yaz. "
-            "Kurallar: Türkçe, hashtagsiz, emojisiz, tarafsız. Maksimum 280 karakter."
+            "Kurallar: Türkçe, hashtagsiz, emojisiz, tarafsız. Maksimum 280 karakter. "
         )
         
         # Gemini 3 Flash modelini kullanıyoruz
@@ -80,3 +80,4 @@ def trigger():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
