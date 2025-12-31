@@ -5,6 +5,7 @@ from flask import Flask
 from google import genai
 from google.genai import types
 import logging
+import re
 
 # --- 1. X (Twitter) API Bağlantısı ---
 def get_v2_client():
@@ -23,28 +24,35 @@ def get_v2_client():
 # Log formatını ayarlayalım: Zaman - Mesaj Seviyesi - İçerik
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def clean_tweet_text(text):
+    """Model hata yapsa bile hashtag ve emojileri temizler."""
+    # 1. Hashtagleri temizle (#Kelime -> Kelime veya tamamen sil)
+    # Eğer sadece hashtag'i silmek istersen:
+    text = re.sub(r'#\w+', '', text)
+    
+    # 2. Emojileri temizle
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    
+    # 3. Gereksiz boşlukları ve satır sonlarını temizle
+    text = " ".join(text.split())
+    
+    return text.strip()
+
 def generate_gemini_tweet():
-    fallback_text = "Türkiye gündemindeki gelişmeleri takip ediyoruz."
+    fallback_text = "Türkiye gündemindeki gelişmeler takip ediliyor."
     
     try:
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
-        # SİSTEM TALİMATINI DAHA SERT VE ÖRNEKLİ HALE GETİRDİK
+        # Talimatı 'Haber Botu' yerine 'Metin Yazarı' olarak değiştirdik ki tweet kalıplarına girmesin
         system_rules = (
-            "Sen bir haber botusun. Sadece tek bir paragraf metin yazarsın. "
-            "ASLA başlık atma, ASLA kategori (Ekonomi, Haber vb.) ekleme. "
-            "ASLA hashtag (#) ve emoji kullanma. "
-            "Örnek Format: Türkiye Cumhuriyet Merkez Bankası bugün faiz kararını açıkladı. Politika faizi yüzde 50 seviyesinde sabit tutuldu. Karar metninde dezenflasyon vurgusu yapıldı."
+            "Sen bir metin yazarıısın. Sadece düz yazı yazarsın. "
+            "Görevin: Verilen haberi tek bir paragraf olarak, hiçbir süsleme yapmadan yazmak. "
+            "YASAKLAR: # karakteri kullanmak yasak, emoji kullanmak yasak, başlık atmak yasak. "
+            "Sadece haberin kendisini yaz ve bitir."
         )
         
-        # Arama sorgusunu biraz daha spesifikleştirdik
-        user_prompt = (
-            "Google Search kullanarak şu an Türkiye'de gerçekleşen, "
-            "son 1 saat içindeki en güncel ve somut olayı bul. "
-            "Genel yıllık değerlendirme yapma, spesifik bir haber seç ve tweetle."
-        )
-        
-        logging.info("--- Gemini 2.0 Flash İşlemde ---")
+        user_prompt = "Google Search ile Türkiye'den son dakika bir haber bul ve sadece haber metnini yaz."
         
         response = client.models.generate_content(
             model='gemini-2.0-flash', 
@@ -52,24 +60,20 @@ def generate_gemini_tweet():
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
-                temperature=0.3 # Yaratıcılığı düşürdük, kurallara daha sadık kalacak
+                temperature=0.1 # En düşük yaratıcılık: Talimata maksimum sadakat
             )
         )
         
-        # Manuel Temizlik: Model hala inatla kategori eklerse onları temizleyelim
-        if response.text:
-            text = response.text.strip()
-            # Eğer son satırda tek bir kelime kalmışsa (Ekonomi gibi), onu temizlemek için:
-            lines = text.split('\n')
-            if len(lines) > 1 and len(lines[-1].split()) == 1:
-                text = "\n".join(lines[:-1]).strip()
-            
-            return text
+        raw_text = response.text.strip() if response.text else fallback_text
         
-        return fallback_text
+        # --- ZORUNLU TEMİZLİK ---
+        # Model ne kadar hata yaparsa yapsın, biz burada temizliyoruz.
+        final_tweet = clean_tweet_text(raw_text)
+        
+        return final_tweet
 
     except Exception as e:
-        logging.error(f"❌ Hata: {str(e)}")
+        print(f"❌ Hata: {e}")
         return fallback_text
 
 app = Flask(__name__)
@@ -82,6 +86,7 @@ def trigger():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
 
 
