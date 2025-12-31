@@ -1,13 +1,12 @@
 import tweepy
 import os
-import datetime
+import textwrap
 from flask import Flask
 from google import genai
-from google.genai.errors import APIError
+from google.genai import types
 
-# --- V2 İstemcisini Oluşturma Fonksiyonu (X API Bağlantısı) ---
+# --- 1. X (Twitter) API Bağlantısı ---
 def get_v2_client():
-    """X V2 API istemcisini oluşturur ve anahtarları ortam değişkenlerinden çeker."""
     try:
         client = tweepy.Client(
             consumer_key=os.environ.get('CONSUMER_KEY'),
@@ -15,91 +14,69 @@ def get_v2_client():
             access_token=os.environ.get('ACCESS_TOKEN'),
             access_token_secret=os.environ.get('ACCESS_TOKEN_SECRET')
         )
-        client.get_me() 
-        print("✅ X V2 İstemcisi Başarıyla Oluşturuldu!")
         return client
     except Exception as e:
-        print(f"❌ X V2 İstemci Hatası: Lütfen anahtarlarınızı ve izinleri kontrol edin. Hata: {e}")
+        print(f"❌ X API Bağlantı Hatası: {e}")
         return None
 
-# --- Gemini'dan Güncel İçerik İsteme Fonksiyonu (Arama Entegre) ---
+# --- 2. Gemini 3 İçerik Üretimi ---
 def generate_gemini_tweet():
-    """Gemini'dan Google Search aracılığıyla güncel bir trend hakkında içerik ister."""
-    fallback_text = "Türkiye gündemini bizimle takip edin. #Gündem"
+    fallback_text = "Türkiye gündemindeki gelişmeleri takip ediyoruz."
     
     try:
-        # 1. Gemini İstemcisini Oluşturma
+        # En güncel SDK istemcisi
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
-        # 2. Gemini'ya Gönderilecek İstek (Prompt)
         prompt = (
-            "Şu anki tt listesinden bir tanesini seç ve onunla ilgili en güncel haberleri tarayıp ilgili bir yazı yaz. Tt olan yazıyı da yazının sonuna koy. Maksimum 230 karakter olsun ve yazı türkçe olacak. Hashtag ve emoji olmayacak. Yazının içerisinde tt listesinden seçtiğin kelime ya da kelimeler de kullanılmalı."
+	    "Şu an Türkiye gündeminde öne çıkan en güncel ve önemli haberi Google'dan ara. "
+            "Bu haber hakkında bilgilendirici tweet metni yaz. "
+            "Kurallar: Türkçe, hashtagsiz, emojisiz, tarafsız. Maksimum 280 karakter."
         )
         
-        # 3. İçerik Oluşturma ve Arama Aracını Ekleme (Grounding)
+        # Gemini 3 Flash modelini kullanıyoruz
         response = client.models.generate_content(
-            model='gemini-2.5-flash', 
+            model='gemini-3-flash-preview', 
             contents=prompt,
-            # GOOGLE ARAMA yeteneği ekleniyor
-            config={"tools": [{"google_search": {}}]} 
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                safety_settings=[
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_ONLY_HIGH"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_ONLY_HIGH")
+                ]
+            )
         )
         
-        # 4. Yanıtı Temizleme ve Döndürme
-        return response.text.strip()
+        if not response.text:
+            return fallback_text
+            
+        tweet_text = response.text.strip()
         
-    except APIError as e:
-        print(f"❌ Gemini API Hatası: {e}")
-        return fallback_text
+        # Kelime bölmeden akıllı kısaltma
+        return textwrap.shorten(tweet_text, width=280, placeholder="...") if len(tweet_text) > 280 else tweet_text
+
     except Exception as e:
-        print(f"❌ Beklenmedik Hata: {e}")
+        print(f"❌ Gemini 3 Hatası: {e}")
         return fallback_text
 
-# --- Ana Tweet Atma Fonksiyonu ---
+# --- 3. Flask ve Bot Çalıştırma ---
 def run_bot():
-    """Gemini'dan içerik çeker ve V2 ile tweet atar."""
-    client = get_v2_client()
-    if not client:
-        return
-
-    # Tweet metnini Gemini'dan al
-    tweet_text = generate_gemini_tweet()
+    x_client = get_v2_client()
+    if not x_client: return
     
+    content = generate_gemini_tweet()
     try:
-        # ZAMAN DAMGASI KALDIRILDI. final_tweet_text sadece Gemini çıktısıdır.
-        final_tweet_text = tweet_text 
-        
-        # 280 karakter limitini aşmaması için kontrol
-        if len(final_tweet_text) > 280:
-             final_tweet_text = final_tweet_text[:277] + "..."
-        
-        # V2 API ile tweet atma
-        client.create_tweet(text=final_tweet_text)
-        
-        print(f"🚀 Gemini ile oluşturulan güncel tweet atıldı: {final_tweet_text}")
-
+        x_client.create_tweet(text=content)
+        print(f"🚀 Gemini 3 ile Tweet Atıldı: {content}")
     except Exception as e:
-        print(f"❌ V2 Tweet Atma Hatası: {e}")
-        raise 
+        print(f"❌ Tweet Hatası: {e}")
 
-# --- Sunucu Yapısı (Dış Tetikleyici İçin Flask) ---
 app = Flask(__name__)
 
-@app.route('/')
-def trigger_tweet():
-    """Dışarıdan (Cron-Job) çağrıldığında botu çalıştırır."""
-    print("📢 Dış Tetikleyici Algılandı. Bot Çalıştırılıyor...")
-    
-    try:
-        run_bot() # Tek bir tweet atma işlemini başlat
-        return "Tweet Tetikleme Başarılı!", 200
-    except Exception as e:
-        print(f"🔴 Ana Tetikleyici Hatası: {e}")
-        return f"Tweet Atılırken Hata Oluştu: {e}", 500
+@app.route('/trigger')
+def trigger():
+    run_bot()
+    return "Tetiklendi", 200
 
-# --- Botun Başlatılması ---
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-
-
-
+    app.run(host='0.0.0.0', port=port)
