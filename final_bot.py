@@ -27,40 +27,34 @@ def get_v2_client():
 
 # --- 2. Metin Temizleme Mekanizması ---
 def absolute_cleaner(text):
-    """Metni tüm etiket, hashtag ve emojilerden arındıran en sert filtre."""
+    """Metnin sonundaki noktadan sonra gelen her türlü ek kelimeyi siler."""
     if not text:
         return ""
 
-    # 1. Adım: Tüm Hashtagleri (#Kelime) ve Emojileri temizle
+    # 1. Hashtag ve Emojileri temizle
     text = re.sub(r'#\S+', '', text)
     text = text.encode('ascii', 'ignore').decode('ascii')
 
-    # 2. Adım: Satırlara böl ve temizle
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
-    
-    if not lines:
-        return ""
+    # 2. Satır sonlarını boşluğa çevir ve temizle
+    text = " ".join(text.split()).strip()
 
-    # 3. Adım: EN KRİTİK NOKTA - Sondaki tekil kelimeyi avla
-    # Eğer birden fazla satır varsa ve son satır sadece 1-2 kelimeden oluşuyorsa sil
-    if len(lines) > 1:
-        last_line = lines[-1]
-        if len(last_line.split()) <= 2:
-            lines.pop()
-    
-    # 4. Adım: Eğer model her şeyi tek satırda gönderdiyse (Noktadan sonraki tek kelimeyi sil)
-    # Örn: "...hazırlanıyor. Fenerbahçe" -> "Fenerbahçe" kısmını atar.
-    full_text = " ".join(lines).strip()
-    
-    # Metnin sonundaki noktadan sonra gelen tek kelimelik ekleri temizle
-    # (Metin en az bir cümle içeriyorsa çalışır)
-    if "." in full_text:
-        parts = full_text.rsplit(".", 1)
-        # Eğer noktadan sonraki kısım çok kısaysa (1-2 kelime), o kısmı atıyoruz
-        if len(parts[1].split()) <= 2:
-            full_text = parts[0] + "."
+    # 3. NOKTA OPERASYONU: 
+    # Metnin en sonundaki noktayı bulur ve sonrasındaki kelimeleri (etiketleri) atar.
+    if "." in text:
+        # Sağdan sola doğru ilk noktayı bul (son cümlenin sonu)
+        parts = text.rsplit(".", 1)
+        main_body = parts[0]
+        after_dot = parts[1].strip()
 
-    return " ".join(full_text.split()).strip()
+        # Eğer noktadan sonra sadece 1-3 kelime varsa (örn: "Asgari Ücret" veya "Ekonomi")
+        # Bunlar haber değil etikettir, onları çöpe atıyoruz.
+        if len(after_dot.split()) <= 3:
+            text = main_body + "."
+        else:
+            # Eğer noktadan sonra uzun bir cümle devam ediyorsa koru
+            text = main_body + "." + after_dot
+
+    return text.strip()
 
 # --- 3. Gemini 2.0 İçerik Üretimi ---
 def generate_gemini_tweet():
@@ -138,4 +132,5 @@ if __name__ == "__main__":
     # Render veya diğer cloud platformları için port ayarı
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
