@@ -27,31 +27,40 @@ def get_v2_client():
 
 # --- 2. Metin Temizleme Mekanizması ---
 def absolute_cleaner(text):
-    """Hashtag, emoji ve gereksiz etiketleri temizleyen kesin çözüm."""
+    """Metni tüm etiket, hashtag ve emojilerden arındıran en sert filtre."""
     if not text:
         return ""
 
-    # 1. Tüm Hashtagleri (#Kelime) siler
+    # 1. Adım: Tüm Hashtagleri (#Kelime) ve Emojileri temizle
     text = re.sub(r'#\S+', '', text)
+    text = text.encode('ascii', 'ignore').decode('ascii')
 
-    # 2. Satırlara böl ve 'Başlık:', 'Kategori:' veya çok kısa son satırları temizle
-    lines = []
-    for line in text.split('\n'):
-        line = line.strip()
-        # Boş satırları veya sadece etiket olan kısa satırları (örn: 'Ekonomi') atla
-        if not line or len(line.split()) <= 2:
-            continue
-        lines.append(line)
+    # 2. Adım: Satırlara böl ve temizle
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
     
-    clean_text = " ".join(lines)
+    if not lines:
+        return ""
 
-    # 3. Emojileri ve ASCII dışı özel karakterleri kazı
-    clean_text = clean_text.encode('ascii', 'ignore').decode('ascii')
+    # 3. Adım: EN KRİTİK NOKTA - Sondaki tekil kelimeyi avla
+    # Eğer birden fazla satır varsa ve son satır sadece 1-2 kelimeden oluşuyorsa sil
+    if len(lines) > 1:
+        last_line = lines[-1]
+        if len(last_line.split()) <= 2:
+            lines.pop()
+    
+    # 4. Adım: Eğer model her şeyi tek satırda gönderdiyse (Noktadan sonraki tek kelimeyi sil)
+    # Örn: "...hazırlanıyor. Fenerbahçe" -> "Fenerbahçe" kısmını atar.
+    full_text = " ".join(lines).strip()
+    
+    # Metnin sonundaki noktadan sonra gelen tek kelimelik ekleri temizle
+    # (Metin en az bir cümle içeriyorsa çalışır)
+    if "." in full_text:
+        parts = full_text.rsplit(".", 1)
+        # Eğer noktadan sonraki kısım çok kısaysa (1-2 kelime), o kısmı atıyoruz
+        if len(parts[1].split()) <= 2:
+            full_text = parts[0] + "."
 
-    # 4. Çift boşlukları temizle
-    clean_text = " ".join(clean_text.split()).strip()
-
-    return clean_text
+    return " ".join(full_text.split()).strip()
 
 # --- 3. Gemini 2.0 İçerik Üretimi ---
 def generate_gemini_tweet():
@@ -129,3 +138,4 @@ if __name__ == "__main__":
     # Render veya diğer cloud platformları için port ayarı
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
