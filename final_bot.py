@@ -80,7 +80,7 @@ def generate_gemini_tweet():
         logging.info("--- Gemini'nin son versiyonu çalışıyor ---")
         
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp',
+            model='gemini-2.0-flash', 
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
@@ -131,6 +131,7 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
 
 
