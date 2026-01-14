@@ -76,10 +76,10 @@ def generate_gemini_tweet():
             "Bu haber hakkında 250 karakteri geçmeyen tarafsız bir bilgi notu yaz."
         )
         
-        logging.info("--- Gemini 1.5 Flash (v001) Çalışıyor ---")
+        logging.info("--- Gemini 1.5 Flash Çalışıyor ---")
         
         response = client.models.generate_content(
-            model='gemini-1.5-flash-001', # KRİTİK DÜZELTME: Tam sürüm adı
+            model='gemini-1.5-flash', # KRİTİK DÜZELTME: Tam sürüm adı
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
@@ -130,3 +130,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
