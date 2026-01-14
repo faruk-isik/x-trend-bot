@@ -69,6 +69,7 @@ def generate_gemini_tweet():
             "Görevin: Google Search kullanarak bulduğun bir haberi 2 veya 3 cümleyle anlatmak. "
             "KESİN YASAKLAR: Hashtag (#) kullanma, emoji kullanma, başlık atma, sonuna kategori ekleme. "
             "Sadece düz metin gönder."
+            "Türkçe olacak."
         )
         
         user_prompt = (
@@ -76,7 +77,7 @@ def generate_gemini_tweet():
             "Bu haber hakkında 250 karakteri geçmeyen tarafsız bir bilgi notu yaz."
         )
         
-        logging.info("--- Gemini 1.5 Flash Çalışıyor ---")
+        logging.info("--- Gemini'nin son versiyonu çalışıyor ---")
         
         response = client.models.generate_content(
             model='gemini-flash-latest',
@@ -125,10 +126,11 @@ def trigger():
 
 @app.route('/')
 def home():
-    return "Haber Botu Çalışıyor (v1.5 Flash Fixed)...", 200
+    return "Haber Botu Çalışıyor...", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
 
