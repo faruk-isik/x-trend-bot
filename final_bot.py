@@ -68,7 +68,7 @@ def generate_gemini_tweet():
         logging.info("--- Gemini 1.5 Pro Çalışıyor ---")
         
         response = client.models.generate_content(
-            model='gemini-1.5-pro', # PRO MODEL: Daha zeki, daha iyi Türkçe.
+            model='gemini-1.5-flash',
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
@@ -118,3 +118,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
