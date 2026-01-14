@@ -27,60 +27,72 @@ def get_v2_client():
 
 # --- 2. Metin Temizleme Mekanizması ---
 def absolute_cleaner(text):
-    """Metnin hamlığını alır, tırnakları ve gereksiz etiketleri temizler."""
+    """Metnin sonundaki noktadan sonra gelen her türlü ek kelimeyi siler."""
     if not text:
         return ""
 
-    # Hashtag temizliği (Pro model bazen abartabilir, garantiye alalım)
+    # 1. Hashtag ve Emojileri temizle
     text = re.sub(r'#\S+', '', text)
-    
-    # Yıldız (*) gibi markdown işaretlerini temizle
-    text = text.replace('*', '').replace('**', '')
+    text = text.encode('ascii', 'ignore').decode('ascii')
 
-    # Satır sonlarını düzenle
+    # 2. Satır sonlarını boşluğa çevir ve temizle
     text = " ".join(text.split()).strip()
 
-    return text
+    # 3. NOKTA OPERASYONU: 
+    # Metnin en sonundaki noktayı bulur ve sonrasındaki kelimeleri (etiketleri) atar.
+    if "." in text:
+        # Sağdan sola doğru ilk noktayı bul (son cümlenin sonu)
+        parts = text.rsplit(".", 1)
+        main_body = parts[0]
+        after_dot = parts[1].strip()
 
-# --- 3. Gemini 1.5 PRO İçerik Üretimi ---
+        # Eğer noktadan sonra sadece 1-3 kelime varsa (örn: "Asgari Ücret" veya "Ekonomi")
+        # Bunlar haber değil etikettir, onları çöpe atıyoruz.
+        if len(after_dot.split()) <= 3:
+            text = main_body + "."
+        else:
+            text = main_body + "." + after_dot
+
+    return text.strip()
+
+# --- 3. Gemini İçerik Üretimi (DÜZELTİLMİŞ) ---
 def generate_gemini_tweet():
-    fallback_text = "Gündem yoğun, gelişmeleri takipteyiz."
+    # Twitter "Duplicate Content" hatası vermesin diye metni değiştirdik
+    fallback_text = "Gündemdeki en son gelişmeleri ve haber akışını taramaya devam ediyoruz."
     
     try:
-        # Yeni SDK yapısı
+        # API Key'in 'Free Tier' projesinden olduğundan emin ol
         client = genai.Client(api_key=os.environ.get('GEMINI_API_KEY'))
         
-        # --- PRO MODEL İÇİN GELİŞMİŞ KİMLİK AYARLARI ---
         system_rules = (
-            "Sen Türkiye gündemini çok iyi okuyan, zeki ve hazırcevap bir sosyal medya fenomenisin. "
-            "Görevin: Google Search aracıyla Türkiye'deki en son 'SON DAKİKA' veya 'TREND' haberi bulmak ve bunu tweetlemek. "
-            "KURALLARIN ŞUNLAR:\n"
-            "1. Asla 'Merhaba', 'İşte haber' gibi girişler yapma. Doğrudan konuya gir.\n"
-            "2. Haberi kuru kuru verme; üzerine 1 cümlelik zekice, hafif iğneleyici veya şaşkınlık belirten yorumunu kat.\n"
-            "3. Asla robotik konuşma (Örn: 'Gelişmeleri aktarıyoruz' DEME. 'Ortalık karıştı' DE).\n"
-            "4. Asla hashtag (#) kullanma.\n"
-            "5. Metnin toplam uzunluğu 260 karakteri geçmesin.\n"
-            "6. Siyaset yapma, haberi ver ve yorumla."
+            "Sen tarafsız bir haber ajansı muhabirisin. Sadece ham haber metni yazarsın. "
+            "Görevin: Google Search kullanarak bulduğun bir haberi 2 veya 3 cümleyle anlatmak. "
+            "KESİN YASAKLAR: Hashtag (#) kullanma, emoji kullanma, başlık atma, sonuna kategori ekleme. "
+            "Sadece düz metin gönder."
         )
         
-        user_prompt = "Türkiye gündemindeki en sıcak gelişme nedir? Bunu Twitter kitlesine uygun dille yaz."
+        user_prompt = (
+            "Türkiye gündeminden en güncel ve somut haberi bul. "
+            "Bu haber hakkında 250 karakteri geçmeyen tarafsız bir bilgi notu yaz."
+        )
         
-        logging.info("--- Gemini Çalışıyor ---")
+        logging.info("--- Gemini 1.5 Flash (v001) Çalışıyor ---")
         
         response = client.models.generate_content(
-            model='gemini-1.5-flash-001',
+            model='gemini-1.5-flash-001', # KRİTİK DÜZELTME: Tam sürüm adı
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
-                tools=[types.Tool(google_search=types.GoogleSearch())], # Güncel arama motoru
-                temperature=0.7 # 0.7 yaratıcılık için idealdir (Pro modelde 0 yaparsak çok sıkıcı olur)
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0.0 
             )
         )
         
-        # Arama sonucundan gelen metni al
         raw_text = response.text.strip() if response.text else fallback_text
         
+        # Kod seviyesinde filtreleme
         final_text = absolute_cleaner(raw_text)
+        
         return final_text if final_text else fallback_text
 
     except Exception as e:
@@ -95,11 +107,11 @@ def run_bot():
     content = generate_gemini_tweet()
     
     try:
-        # Güvenlik önlemi olarak kısaltma
+        # X'in karakter sınırına karşı son güvenlik önlemi
         content = textwrap.shorten(content, width=275, placeholder="...")
         
         x_client.create_tweet(text=content)
-        logging.info(f"🚀 Tweet Atıldı: {content}")
+        logging.info(f"🚀 Tweet Başarıyla Atıldı: {content}")
     except Exception as e:
         logging.error(f"❌ Tweet Gönderim Hatası: {e}")
 
@@ -109,14 +121,12 @@ app = Flask(__name__)
 @app.route('/trigger')
 def trigger():
     run_bot()
-    return "Bot başarıyla tetiklendi.", 200
+    return "Bot tetiklendi ve süreç tamamlandı.", 200
 
 @app.route('/')
 def home():
-    return "Gemini Pro Botu Aktif", 200
+    return "Haber Botu Çalışıyor (v1.5 Flash Fixed)...", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
-
-
