@@ -65,10 +65,10 @@ def generate_gemini_tweet():
         
         user_prompt = "Türkiye gündemindeki en sıcak gelişme nedir? Bunu Twitter kitlesine uygun dille yaz."
         
-        logging.info("--- Gemini 1.5 Pro Çalışıyor ---")
+        logging.info("--- Gemini Çalışıyor ---")
         
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-1.5-flash-001',
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_rules,
@@ -118,4 +118,5 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
+
 
