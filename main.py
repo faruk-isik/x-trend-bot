@@ -530,6 +530,7 @@ KURALLAR:
 4. Gereksiz kelime kullanma
 5. Hashtag KULLANMA
 6. Sadece haber özeti yaz, başka hiçbir şey yazma
+7. Kesinlikle hakaret ve küfür içerikli yazılar yazma.
 
 ÖRNEK FORMAT:
 "Ekonomi Bakanı Mehmet Şimşek, enflasyonla mücadele kapsamında yeni teşvik paketini açıkladı. Pakette KOBİ'lere 5 milyar TL destek, ihracatçılara vergi indirimi ve tarım sektörüne ucuz kredi imkanı yer alıyor. Paket 1 Şubat'ta yürürlüğe girecek."
@@ -544,7 +545,8 @@ KURALLAR:
 Haberleri 280 karakterlik tweet formatında özetliyorsun.
 Her karakteri verimli kullan, gereksiz kelime ekleme.
 Somut bilgileri (sayı, isim, yer) mutlaka ekle.
-Okuyucu haberin tüm önemli detaylarını anlamalı."""
+Okuyucu haberin tüm önemli detaylarını anlamalı.
+Kesinlikle hakaret ve küfür içerikli yazılar yazma."""
                 },
                 {
                     "role": "user",
