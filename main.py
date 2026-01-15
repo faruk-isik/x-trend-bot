@@ -101,11 +101,17 @@ def job():
         print(f"Twitter API Hatası (Muhtemelen 429 Limit): {e}")
 
 if __name__ == "__main__":
+    print("Sistem Başlatılıyor...")
+    
+    # 1. Web sunucusunu ayrı bir kanalda başlat
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
     
-     job() # X limitlerini zorlamamak için başlangıçta çalıştırmayı opsiyonel olarak kapatabilirsin
+    # 2. Botu hemen çalıştır (Hiza hatası giderildi)
+    job() 
+    
+    # 3. Her 30 dakikada bir çalışacak şekilde planla
     schedule.every(30).minutes.do(job)
     
     while True:
