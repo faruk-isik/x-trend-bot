@@ -2,5 +2,5 @@ tweepy
 schedule
 flask
 requests
-duckduckgo-search
+ddgs
 openai
