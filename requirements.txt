@@ -1,5 +1,5 @@
 tweepy
 schedule
 flask
-google-genai
+requests
 duckduckgo-search
