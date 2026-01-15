@@ -1,0 +1,4 @@
+tweepy
+schedule
+google-generativeai
+duckduckgo-search
