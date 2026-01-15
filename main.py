@@ -10,7 +10,7 @@ from datetime import datetime
 from flask import Flask
 
 # --- VERSİYON KONTROL ---
-print("VERSION: GEMINI PRO - FINAL (V6.0)")
+print("VERSION: AUTO-MODEL SELECTOR (V7.0)")
 
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
@@ -24,7 +24,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Calisiyor (Gemini Pro Modu)"
+    return "Bot Calisiyor (Multi-Model Modu)"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=8000)
@@ -44,20 +44,27 @@ def search_latest_news():
     news_results = []
     try:
         with DDGS() as ddgs:
-            # Son 1 gün (d)
+            # Son 1 gün
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
             if not results: return None
             for r in results:
-                news_results.append(f"Başlık: {r.get('title','')} - Detay: {r.get('body','')}")
+                title = r.get('title', 'Basliksiz')
+                body = r.get('body', 'Detaysiz')
+                news_results.append(f"Başlık: {title} - Detay: {body}")
     except Exception as e:
         print(f"Arama hatası: {e}")
         return None
     return "\n".join(news_results)
 
-# --- GEMINI (MANUEL HTTP İSTEĞİ - GEMINI PRO) ---
+# --- GEMINI (AKILLI MODEL SEÇİCİ) ---
 def ask_gemini_manual(prompt):
-    # DEĞİŞİKLİK BURADA: 'gemini-1.5-flash' YERİNE 'gemini-pro' YAZDIK.
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    # Denenecek Modeller Listesi (Sırayla dener)
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro",
+        "gemini-pro"
+    ]
     
     headers = {'Content-Type': 'application/json'}
     data = {
@@ -65,20 +72,35 @@ def ask_gemini_manual(prompt):
             "parts": [{"text": prompt}]
         }]
     }
-    
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(data))
+
+    # Döngü: Modelleri tek tek dener
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         
-        if response.status_code == 200:
-            result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text'].strip()
-        else:
-            print(f"Gemini API Hatası: {response.status_code} - {response.text}")
-            return "YOK"
+        try:
+            # print(f"Deneniyor: {model_name}...") 
+            response = requests.post(url, headers=headers, data=json.dumps(data))
             
-    except Exception as e:
-        print(f"HTTP İstek Hatası: {e}")
-        return "YOK"
+            if response.status_code == 200:
+                result = response.json()
+                print(f"BAŞARILI! Çalışan Model: {model_name}")
+                return result['candidates'][0]['content']['parts'][0]['text'].strip()
+            
+            elif response.status_code == 404:
+                # 404 hatası model bulunamadı demektir, bir sonrakine geç
+                print(f"Model bulunamadı ({model_name}), bir sonrakine geçiliyor...")
+                continue
+            else:
+                # Başka bir hata varsa (örn: Yetki hatası) yazdır ama devam et
+                print(f"Hata ({model_name}): {response.status_code} - {response.text}")
+                continue
+                
+        except Exception as e:
+            print(f"Bağlantı hatası ({model_name}): {e}")
+            continue
+    
+    # Döngü bitti ve hiçbiri çalışmadıysa
+    return "YOK"
 
 def analyze_and_write_tweet(raw_data):
     if not raw_data: return "YOK"
@@ -107,7 +129,7 @@ def job():
     tweet_content = analyze_and_write_tweet(raw_news)
     
     if tweet_content == "YOK" or not tweet_content:
-        print("Kayda değer haber yok.")
+        print("Kayda değer haber yok veya Gemini yanıt veremedi.")
         return
 
     if tweet_content == last_news_summary:
