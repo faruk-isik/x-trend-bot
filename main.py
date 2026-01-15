@@ -6,7 +6,7 @@ import google.generativeai as genai
 from duckduckgo_search import DDGS
 from datetime import datetime
 
-# --- AYARLAR VE ANAHTARLAR ---
+# --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
 X_API_SECRET = os.getenv("X_API_SECRET")
 X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
@@ -15,8 +15,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Gemini Ayarları
 genai.configure(api_key=GEMINI_API_KEY)
-# Yeni kütüphane uyarılarını dikkate alarak modeli çağırıyoruz
-model = genai.GenerativeModel('gemini-1.5-flash')
+# MODEL DEĞİŞİKLİĞİ: "gemini-pro" en stabil ve hatasız çalışan modeldir.
+model = genai.GenerativeModel('gemini-pro')
 
 last_news_summary = ""
 
@@ -33,30 +33,27 @@ def search_latest_news():
     print("İnternet taranıyor...")
     news_results = []
     try:
+        # DDGS kütüphanesinin güncel kullanımı
         with DDGS() as ddgs:
-            # DÜZELTME: 'h' (saat) yerine 'd' (gün) yaptık. 
-            # Bu sayede "Arama hatası: h" sorunu çözülecek.
+            # 'd' = son 1 gün (day)
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
             
-            # Sonuçların boş olup olmadığını kontrol et
             if not results:
                 print("DuckDuckGo sonuç döndürmedi.")
                 return None
 
             for r in results:
-                # Bazen body boş gelebilir, title kullanalım
                 body_text = r.get('body', '')
                 title_text = r.get('title', '')
                 news_results.append(f"Başlık: {title_text} - Detay: {body_text}")
                 
     except Exception as e:
-        print(f"Arama fonksiyonunda hata oluştu: {e}")
+        print(f"Arama hatası: {e}")
         return None
     
     return "\n".join(news_results)
 
 def analyze_and_write_tweet(raw_data):
-    """Ham veriyi Gemini'ye gönderir ve tarafsız tweet ister."""
     if not raw_data:
         return "YOK"
 
@@ -90,7 +87,7 @@ def job():
     raw_news = search_latest_news()
     
     if not raw_news:
-        print("Haber bulunamadı veya arama hatası.")
+        print("Haber bulunamadı.")
         return
 
     tweet_content = analyze_and_write_tweet(raw_news)
@@ -113,14 +110,14 @@ def job():
     except Exception as e:
         print(f"Tweet atma hatası: {e}")
 
-# İlk açılışta hemen bir kontrol etsin
+# İlk açılışta çalıştır
 job()
 
-# Sonra her 30 dakikada bir çalışsın
+# Her 30 dakikada bir çalıştır
 schedule.every(30).minutes.do(job)
 
 if __name__ == "__main__":
-    print("Yapay Zeka Muhabiri v2 Başlatıldı...")
+    print("Yapay Zeka Muhabiri (Gemini Pro) Başlatıldı...")
     while True:
         schedule.run_pending()
         time.sleep(1)
