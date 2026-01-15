@@ -3,13 +3,14 @@ import schedule
 import time
 import os
 import threading
-from google import genai
+import requests
+import json
 from duckduckgo_search import DDGS
 from datetime import datetime
 from flask import Flask
 
 # --- VERSİYON KONTROL ---
-print("VERSION: YENI KOD CALISTI (Google GenAI v1)")
+print("VERSION: RAW HTTP REQUEST MODU (V5.0)")
 
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
@@ -18,21 +19,17 @@ X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# --- KOYEB WEB SUNUCUSU ---
+# --- WEB SUNUCUSU ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif! (v4.0 Final)"
+    return "Bot Calisiyor (HTTP Request Modu)"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=8000)
 
-# --- GEMINI (YENI NESIL CLIENT) ---
-client_gemini = genai.Client(api_key=GEMINI_API_KEY)
-
-last_news_summary = ""
-
+# --- TWITTER BAĞLANTISI ---
 def get_twitter_conn():
     return tweepy.Client(
         consumer_key=X_API_KEY,
@@ -41,26 +38,51 @@ def get_twitter_conn():
         access_token_secret=X_ACCESS_SECRET
     )
 
+# --- HABER ARAMA ---
 def search_latest_news():
     print("İnternet taranıyor...")
     news_results = []
     try:
         with DDGS() as ddgs:
-            # 'd' = Son 1 gün
+            # Son 1 gün (d)
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
-            
             if not results: return None
-
             for r in results:
-                title = r.get('title', '')
-                body = r.get('body', '')
-                news_results.append(f"Başlık: {title} - Detay: {body}")
-                
+                news_results.append(f"Başlık: {r.get('title','')} - Detay: {r.get('body','')}")
     except Exception as e:
         print(f"Arama hatası: {e}")
         return None
-    
     return "\n".join(news_results)
+
+# --- GEMINI (MANUEL HTTP İSTEĞİ) ---
+def ask_gemini_manual(prompt):
+    """
+    Kütüphane kullanmadan doğrudan Google API'ye bağlanır.
+    Bu yöntem versiyon hatalarından etkilenmez.
+    """
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(data))
+        
+        if response.status_code == 200:
+            result = response.json()
+            # Cevabın içinden metni ayıkla
+            return result['candidates'][0]['content']['parts'][0]['text'].strip()
+        else:
+            print(f"Gemini API Hatası: {response.status_code} - {response.text}")
+            return "YOK"
+            
+    except Exception as e:
+        print(f"HTTP İstek Hatası: {e}")
+        return "YOK"
 
 def analyze_and_write_tweet(raw_data):
     if not raw_data: return "YOK"
@@ -68,27 +90,14 @@ def analyze_and_write_tweet(raw_data):
     prompt = f"""
     Sen Türkiye'nin en güvenilir haber muhabirisin.
     Aşağıdaki son dakika haberlerinden EN ÖNEMLİ, ulusal gündemi etkileyen TEK BİR olayı seç.
-    
-    Seçtiğin haberi tarafsız, net ve ciddi bir dille, bir haber ajansı diliyle yaz.
-    Yorum katma, sadece olguyu aktar.
-    Uzunluk: Maksimum 270 karakter.
-    Hashtag: Kullanma.
-    Haber değeri yoksa sadece "YOK" yaz.
-    
-    VERİLER:
-    {raw_data}
+    Seçtiğin haberi tarafsız, net ve ciddi bir dille, yorum katmadan 270 karakteri geçmeyecek şekilde yaz.
+    Haber değeri yoksa "YOK" yaz.
+    VERİLER: {raw_data}
     """
     
-    try:
-        # YENİ KOD YAPISI BURASI
-        response = client_gemini.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
-        return response.text.strip()
-    except Exception as e:
-        print(f"Gemini hatası: {e}")
-        return "YOK"
+    return ask_gemini_manual(prompt)
+
+last_news_summary = ""
 
 def job():
     global last_news_summary
@@ -120,12 +129,11 @@ def job():
         print(f"Tweet Hatası: {e}")
 
 if __name__ == "__main__":
-    print("Sistem Başlatılıyor...")
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
     
-    job() # İlk test
+    job()
     schedule.every(30).minutes.do(job)
     
     while True:
