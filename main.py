@@ -15,9 +15,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Gemini Ayarları
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash') # Hız ve maliyet için Flash ideal
+# Yeni kütüphane uyarılarını dikkate alarak modeli çağırıyoruz
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Son paylaşılan haberin özeti hafızada kalsın (Tekrarı önlemek için)
 last_news_summary = ""
 
 def get_twitter_conn():
@@ -29,87 +29,98 @@ def get_twitter_conn():
     )
 
 def search_latest_news():
-    """DuckDuckGo üzerinden son 1 saatteki Türkiye haberlerini tarar."""
+    """DuckDuckGo üzerinden son 24 saatteki Türkiye haberlerini tarar."""
     print("İnternet taranıyor...")
     news_results = []
     try:
         with DDGS() as ddgs:
-            # "Türkiye haberleri", son 1 saat (h), Türkiye bölgesi (tr-tr)
-            results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='h', max_results=10)
+            # DÜZELTME: 'h' (saat) yerine 'd' (gün) yaptık. 
+            # Bu sayede "Arama hatası: h" sorunu çözülecek.
+            results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
+            
+            # Sonuçların boş olup olmadığını kontrol et
+            if not results:
+                print("DuckDuckGo sonuç döndürmedi.")
+                return None
+
             for r in results:
-                news_results.append(f"Kaynak: {r['title']} - Özet: {r['body']}")
+                # Bazen body boş gelebilir, title kullanalım
+                body_text = r.get('body', '')
+                title_text = r.get('title', '')
+                news_results.append(f"Başlık: {title_text} - Detay: {body_text}")
+                
     except Exception as e:
-        print(f"Arama hatası: {e}")
+        print(f"Arama fonksiyonunda hata oluştu: {e}")
+        return None
     
     return "\n".join(news_results)
 
 def analyze_and_write_tweet(raw_data):
     """Ham veriyi Gemini'ye gönderir ve tarafsız tweet ister."""
-    
+    if not raw_data:
+        return "YOK"
+
     prompt = f"""
     Sen Türkiye'nin en güvenilir, en tarafsız ve soğukkanlı haber muhabirisin.
-    Aşağıda sana internetten taranmış son dakika haber verileri sunuyorum.
+    Aşağıda sana internetten taranmış son 24 saatin haber verileri sunuyorum.
     
     GÖREVLERİN:
-    1. Bu veriler içindeki EN ÖNEMLİ, ulusal gündemi ilgilendiren tek bir olayı seç. (Yerel 3. sayfa haberlerini veya magazini yoksay).
+    1. Bu veriler içindeki EN ÖNEMLİ, ulusal gündemi ilgilendiren tek bir olayı seç.
     2. Seçtiğin bu haberi "tarafsız" bir dille, yorum katmadan, sadece gerçeği aktararak yeniden yaz.
     3. Asla "iddia edildi", "söyleniyor" gibi güvensiz ifadeler kullanma, net olguları yaz.
-    4. Maksimum 270 karakter olsun (X/Twitter sınırı).
+    4. Maksimum 270 karakter olsun.
     5. Hashtag kullanma.
-    6. Eğer kayda değer, çok önemli bir haber yoksa veya veriler boşsa sadece "YOK" yaz.
+    6. Eğer kayda değer haber yoksa "YOK" yaz.
     
     TARANAN VERİLER:
     {raw_data}
     """
     
-    response = model.generate_content(prompt)
-    return response.text.strip()
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"Gemini hatası: {e}")
+        return "YOK"
 
 def job():
     global last_news_summary
     print(f"[{datetime.now()}] Görev başladı...")
     
-    # 1. Haberleri Ara
     raw_news = search_latest_news()
     
     if not raw_news:
-        print("Haber bulunamadı.")
+        print("Haber bulunamadı veya arama hatası.")
         return
 
-    # 2. Gemini ile Analiz Et
+    tweet_content = analyze_and_write_tweet(raw_news)
+    
+    if tweet_content == "YOK" or not tweet_content:
+        print("Gemini kayda değer bir haber bulamadı.")
+        return
+
+    if tweet_content == last_news_summary:
+        print("Bu haber zaten paylaşıldı.")
+        return
+
+    print(f"Oluşturulan Tweet: {tweet_content}")
+
     try:
-        tweet_content = analyze_and_write_tweet(raw_news)
-        
-        # Eğer Gemini haber değeri görmediyse
-        if tweet_content == "YOK":
-            print("Gemini kayda değer bir haber bulamadı.")
-            return
-
-        # 3. Tekrar Kontrolü (Basit benzerlik kontrolü)
-        # Eğer yeni üretilen tweet, bir öncekiyle çok benzerse atlama.
-        if tweet_content == last_news_summary:
-            print("Bu haber zaten paylaşıldı (veya çok benzer).")
-            return
-
-        print(f"Oluşturulan Tweet: {tweet_content}")
-
-        # 4. Tweet At
         client = get_twitter_conn()
         client.create_tweet(text=tweet_content)
-        
         print("Tweet başarıyla gönderildi!")
-        last_news_summary = tweet_content # Hafızayı güncelle
-
+        last_news_summary = tweet_content
     except Exception as e:
-        print(f"İşlem sırasında hata: {e}")
+        print(f"Tweet atma hatası: {e}")
 
-# --- ZAMANLAYICI ---
-# Her 30 dakikada bir tarama yapsın
+# İlk açılışta hemen bir kontrol etsin
+job()
+
+# Sonra her 30 dakikada bir çalışsın
 schedule.every(30).minutes.do(job)
 
 if __name__ == "__main__":
-    print("Yapay Zeka Muhabiri Başlatıldı (Koyeb)...")
-    job() # İlk açılışta test et
+    print("Yapay Zeka Muhabiri v2 Başlatıldı...")
     while True:
         schedule.run_pending()
         time.sleep(1)
