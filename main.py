@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- VERSİYON ---
-VERSION = "12.0 - NTV Son Dakika + Akıllı Tekrar Kontrolü"
+VERSION = "12.1 - Türkiye Gündemi + Tweet Geçmişi"
 logger.info(f"VERSION: {VERSION}")
 
 # --- AYARLAR ---
@@ -46,6 +46,7 @@ last_news_summary = ""
 last_tweet_time = "Henüz tweet atılmadı"
 tweeted_news_hashes = set()  # Hash ile tekrar kontrolü
 recent_news_titles = []  # Son 20 haber başlığı
+tweet_log = []  # Tweet geçmişi (en son 10 tweet)
 is_busy = False
 
 # --- WEB SUNUCUSU ---
@@ -56,12 +57,25 @@ def home():
     status_emoji = '🔴 Meşgul' if is_busy else '🟢 Hazır'
     trigger_url = f"/trigger?token={SECRET_TOKEN}"
     
+    # Tweet log'unu HTML'e çevir
+    tweet_log_html = ""
+    if tweet_log:
+        for log_entry in reversed(tweet_log):  # En yeni üstte
+            tweet_log_html += f"""
+            <div class="tweet-log-item">
+                <div class="tweet-time">🕐 {log_entry['time']}</div>
+                <div class="tweet-text">{log_entry['tweet']}</div>
+            </div>
+            """
+    else:
+        tweet_log_html = '<p style="color: #999; text-align: center; padding: 20px;">Henüz tweet atılmadı</p>'
+    
     return f"""
     <html>
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>NTV Haber Botu</title>
+        <title>Türkiye Gündemi Botu</title>
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
             body {{
@@ -71,7 +85,7 @@ def home():
                 padding: 20px;
             }}
             .container {{
-                max-width: 800px;
+                max-width: 900px;
                 margin: 0 auto;
                 background: white;
                 border-radius: 20px;
@@ -84,6 +98,7 @@ def home():
                 display: flex;
                 align-items: center;
                 gap: 10px;
+                font-size: 28px;
             }}
             .status-badge {{
                 display: inline-block;
@@ -136,37 +151,47 @@ def home():
                 transform: translateY(-2px);
                 box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
             }}
-            .link-box {{
-                background: #fff3cd;
-                border: 2px solid #ffc107;
-                padding: 15px;
+            .tweet-log {{
+                background: #f8f9fa;
+                padding: 25px;
                 border-radius: 10px;
-                margin: 20px 0;
+                margin-top: 30px;
             }}
-            .link-box strong {{
-                color: #856404;
+            .tweet-log h2 {{
+                color: #667eea;
+                margin-bottom: 20px;
+                font-size: 20px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
             }}
-            .link-box code {{
-                display: block;
+            .tweet-log-item {{
                 background: white;
-                padding: 10px;
-                border-radius: 5px;
-                margin-top: 10px;
-                word-break: break-all;
-                font-size: 12px;
-            }}
-            .source-info {{
-                background: #e3f2fd;
                 padding: 15px;
-                border-radius: 10px;
-                margin-top: 20px;
-                border-left: 4px solid #2196F3;
+                border-radius: 8px;
+                margin-bottom: 12px;
+                border-left: 4px solid #667eea;
+                transition: all 0.2s;
+            }}
+            .tweet-log-item:hover {{
+                transform: translateX(5px);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            }}
+            .tweet-time {{
+                color: #999;
+                font-size: 13px;
+                margin-bottom: 6px;
+            }}
+            .tweet-text {{
+                color: #333;
+                font-size: 15px;
+                line-height: 1.5;
             }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>📺 NTV Son Dakika Bot</h1>
+            <h1>🇹🇷 Türkiye Gündemi Botu</h1>
             <span class="status-badge">{status_emoji}</span>
             
             <div class="info-grid">
@@ -188,28 +213,11 @@ def home():
                 🚀 ŞİMDİ TWEET AT
             </a>
 
-            <div class="link-box">
-                <strong>🔗 TEK TIKLA TWEET LINKI:</strong>
-                <code id="triggerLink">https://your-app.koyeb.app{trigger_url}</code>
-                <button onclick="copyLink()" style="margin-top: 10px; padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">
-                    📋 Linki Kopyala
-                </button>
-            </div>
-
-            <div class="source-info">
-                <h3 style="color: #1976D2; margin-bottom: 10px;">📡 Haber Kaynağı</h3>
-                <p style="color: #333;">NTV Son Dakika RSS Feed</p>
-                <p style="color: #666; font-size: 14px; margin-top: 5px;">Türkiye'nin en güncel haberleri</p>
+            <div class="tweet-log">
+                <h2>📜 Tweet Geçmişi</h2>
+                {tweet_log_html}
             </div>
         </div>
-
-        <script>
-            function copyLink() {{
-                const link = document.getElementById('triggerLink').innerText;
-                navigator.clipboard.writeText(link);
-                alert('✅ Link kopyalandı!');
-            }}
-        </script>
     </body>
     </html>
     """
@@ -232,7 +240,8 @@ def status():
         "last_tweet_content": last_news_summary[:100] + "..." if last_news_summary else "Yok",
         "is_busy": is_busy,
         "processed_news_count": len(tweeted_news_hashes),
-        "recent_titles_count": len(recent_news_titles)
+        "recent_titles_count": len(recent_news_titles),
+        "tweet_log": tweet_log
     })
 
 @app.route('/debug-token')
@@ -571,7 +580,7 @@ Okuyucu haberin tüm önemli detaylarını anlamalı."""
 
 # --- ANA GÖREV FONKSİYONU ---
 def job(manual=False):
-    global last_news_summary, last_tweet_time, is_busy, tweeted_news_hashes, recent_news_titles
+    global last_news_summary, last_tweet_time, is_busy, tweeted_news_hashes, recent_news_titles, tweet_log
     
     if is_busy:
         logger.warning("Bot meşgul, görev atlandı")
@@ -617,6 +626,16 @@ def job(manual=False):
         # Son 20 başlığı tut
         if len(recent_news_titles) > 20:
             recent_news_titles.pop(0)
+        
+        # Tweet log'una ekle
+        tweet_log.append({
+            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'tweet': tweet_text
+        })
+        
+        # Son 10 tweet'i tut
+        if len(tweet_log) > 10:
+            tweet_log.pop(0)
         
         last_news_summary = tweet_text
         last_tweet_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
