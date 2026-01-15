@@ -2,9 +2,11 @@ import tweepy
 import schedule
 import time
 import os
+import threading
 import google.generativeai as genai
 from duckduckgo_search import DDGS
 from datetime import datetime
+from flask import Flask
 
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
@@ -13,10 +15,20 @@ X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Gemini Ayarları
+# --- KOYEB'İ AYAKTA TUTACAK WEB SUNUCUSU ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot Aktif ve Calisiyor!"
+
+def run_web_server():
+    # Koyeb 8000 portunu dinler
+    app.run(host='0.0.0.0', port=8000)
+
+# --- GEMINI VE BOT AYARLARI ---
 genai.configure(api_key=GEMINI_API_KEY)
-# MODEL DEĞİŞİKLİĞİ: "gemini-pro" en stabil ve hatasız çalışan modeldir.
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 last_news_summary = ""
 
@@ -29,23 +41,20 @@ def get_twitter_conn():
     )
 
 def search_latest_news():
-    """DuckDuckGo üzerinden son 24 saatteki Türkiye haberlerini tarar."""
     print("İnternet taranıyor...")
     news_results = []
     try:
-        # DDGS kütüphanesinin güncel kullanımı
         with DDGS() as ddgs:
-            # 'd' = son 1 gün (day)
+            # 'd' = son 1 gün. Hata almamak için en güvenli aralık.
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
             
             if not results:
-                print("DuckDuckGo sonuç döndürmedi.")
                 return None
 
             for r in results:
-                body_text = r.get('body', '')
-                title_text = r.get('title', '')
-                news_results.append(f"Başlık: {title_text} - Detay: {body_text}")
+                title = r.get('title', '')
+                body = r.get('body', '')
+                news_results.append(f"Başlık: {title} - Detay: {body}")
                 
     except Exception as e:
         print(f"Arama hatası: {e}")
@@ -54,22 +63,18 @@ def search_latest_news():
     return "\n".join(news_results)
 
 def analyze_and_write_tweet(raw_data):
-    if not raw_data:
-        return "YOK"
+    if not raw_data: return "YOK"
 
     prompt = f"""
-    Sen Türkiye'nin en güvenilir, en tarafsız ve soğukkanlı haber muhabirisin.
-    Aşağıda sana internetten taranmış son 24 saatin haber verileri sunuyorum.
+    Sen Türkiye'nin en güvenilir haber muhabirisin.
+    Aşağıdaki son dakika haberlerinden EN ÖNEMLİ, ulusal gündemi etkileyen TEK BİR olayı seç.
+    Magazin ve 3. sayfa haberlerini görmezden gel.
     
-    GÖREVLERİN:
-    1. Bu veriler içindeki EN ÖNEMLİ, ulusal gündemi ilgilendiren tek bir olayı seç.
-    2. Seçtiğin bu haberi "tarafsız" bir dille, yorum katmadan, sadece gerçeği aktararak yeniden yaz.
-    3. Asla "iddia edildi", "söyleniyor" gibi güvensiz ifadeler kullanma, net olguları yaz.
-    4. Maksimum 270 karakter olsun.
-    5. Hashtag kullanma.
-    6. Eğer kayda değer haber yoksa "YOK" yaz.
+    Seçtiğin haberi tarafsız, net ve ciddi bir dille 270 karakteri geçmeyecek şekilde yaz.
+    Yorum katma, sadece olguyu aktar. Hashtag kullanma.
+    Haber değeri taşıyan ciddi bir şey yoksa sadece "YOK" yaz.
     
-    TARANAN VERİLER:
+    VERİLER:
     {raw_data}
     """
     
@@ -82,10 +87,9 @@ def analyze_and_write_tweet(raw_data):
 
 def job():
     global last_news_summary
-    print(f"[{datetime.now()}] Görev başladı...")
+    print(f"[{datetime.now()}] Haber taraması başladı...")
     
     raw_news = search_latest_news()
-    
     if not raw_news:
         print("Haber bulunamadı.")
         return
@@ -93,31 +97,39 @@ def job():
     tweet_content = analyze_and_write_tweet(raw_news)
     
     if tweet_content == "YOK" or not tweet_content:
-        print("Gemini kayda değer bir haber bulamadı.")
+        print("Kayda değer haber yok.")
         return
 
     if tweet_content == last_news_summary:
-        print("Bu haber zaten paylaşıldı.")
+        print("Bu haber zaten atıldı.")
         return
 
-    print(f"Oluşturulan Tweet: {tweet_content}")
+    print(f"Tweet Hazır: {tweet_content}")
 
     try:
         client = get_twitter_conn()
         client.create_tweet(text=tweet_content)
-        print("Tweet başarıyla gönderildi!")
+        print("Tweet Gönderildi!")
         last_news_summary = tweet_content
     except Exception as e:
-        print(f"Tweet atma hatası: {e}")
+        print(f"Tweet Hatası: {e}")
 
-# İlk açılışta çalıştır
-job()
-
-# Her 30 dakikada bir çalıştır
-schedule.every(30).minutes.do(job)
-
+# --- ANA ÇALIŞMA BLOĞU ---
 if __name__ == "__main__":
-    print("Yapay Zeka Muhabiri (Gemini Pro) Başlatıldı...")
+    print("Sistem Başlatılıyor...")
+    
+    # 1. Web sunucusunu ayrı bir kanalda (thread) başlat
+    t = threading.Thread(target=run_web_server)
+    t.daemon = True
+    t.start()
+    
+    # 2. Botu başlat
+    # İlk açılışta hemen bir kontrol et
+    job()
+    
+    # Sonra her 30 dakikada bir devam et
+    schedule.every(30).minutes.do(job)
+    
     while True:
         schedule.run_pending()
         time.sleep(1)
