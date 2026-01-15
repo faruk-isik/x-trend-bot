@@ -4,7 +4,7 @@ import time
 import os
 import threading
 from openai import OpenAI
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from datetime import datetime
 from flask import Flask
 
@@ -46,7 +46,7 @@ def search_latest_news():
     news_results = []
     try:
         with DDGS() as ddgs:
-            results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
+            results = ddgs.text("Türkiye gündemi son dakika", region='tr-tr', timelimit='d', max_results=10)
             if not results: return None
             for r in results:
                 news_results.append(f"Başlık: {r.get('title','')} - Detay: {r.get('body','')}")
@@ -62,10 +62,10 @@ def analyze_and_write_tweet(raw_data):
     try:
         response = client_ai.chat.completions.create(
             model="gpt-4o-mini", # En hızlı ve ekonomik model
-            messages=[
-                {"role": "system", "content": "Sen tarafsız ve ciddi bir haber muhabirisin. Sana verilen haberlerden en önemli olanı seçip 270 karakterlik bir tweet oluşturursun. Haber değeri yoksa sadece 'YOK' yazarsın."},
-                {"role": "user", "content": f"Aşağıdaki verileri analiz et ve tek bir haber paylaş:\n{raw_data}"}
-            ],
+messages=[
+    {"role": "system", "content": "Sen aktif bir haber muhabirisin. Haberler arasından güncel bir tanesini seç ve 270 karakterlik ilgi çekici bir tweet oluştur. Sadece haber içeriği çok yetersizse 'YOK' yaz."},
+    {"role": "user", "content": f"Şu haberleri analiz et ve birini paylaş:\n{raw_data}"}
+],
             max_tokens=150
         )
         return response.choices[0].message.content.strip()
