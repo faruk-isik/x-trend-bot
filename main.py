@@ -3,7 +3,7 @@ import schedule
 import time
 import os
 import threading
-import google.generativeai as genai
+from google import genai
 from duckduckgo_search import DDGS
 from datetime import datetime
 from flask import Flask
@@ -20,15 +20,14 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif ve Calisiyor!"
+    return "Bot Aktif ve Calisiyor! (v3.0)"
 
 def run_web_server():
-    # Koyeb 8000 portunu dinler
     app.run(host='0.0.0.0', port=8000)
 
-# --- GEMINI VE BOT AYARLARI ---
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# --- GEMINI (YENİ NESİL) AYARLARI ---
+# Artık eski 'configure' yok, yeni Client yapısı var.
+client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 last_news_summary = ""
 
@@ -45,7 +44,7 @@ def search_latest_news():
     news_results = []
     try:
         with DDGS() as ddgs:
-            # 'd' = son 1 gün. Hata almamak için en güvenli aralık.
+            # 'd' = son 1 gün. 
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
             
             if not results:
@@ -79,7 +78,11 @@ def analyze_and_write_tweet(raw_data):
     """
     
     try:
-        response = model.generate_content(prompt)
+        # YENİ KÜTÜPHANE SÖZ DİZİMİ
+        response = client_gemini.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
         return response.text.strip()
     except Exception as e:
         print(f"Gemini hatası: {e}")
@@ -116,18 +119,15 @@ def job():
 
 # --- ANA ÇALIŞMA BLOĞU ---
 if __name__ == "__main__":
-    print("Sistem Başlatılıyor...")
+    print("Sistem Başlatılıyor (Yeni Google GenAI)...")
     
-    # 1. Web sunucusunu ayrı bir kanalda (thread) başlat
+    # 1. Web sunucusunu başlat
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
     
     # 2. Botu başlat
-    # İlk açılışta hemen bir kontrol et
     job()
-    
-    # Sonra her 30 dakikada bir devam et
     schedule.every(30).minutes.do(job)
     
     while True:
