@@ -5,7 +5,7 @@ import os
 import threading
 import logging
 from groq import Groq
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from datetime import datetime
 from flask import Flask, jsonify, request
 from difflib import SequenceMatcher
