@@ -105,7 +105,7 @@ if __name__ == "__main__":
     t.daemon = True
     t.start()
     
-    # job() # X limitlerini zorlamamak için başlangıçta çalıştırmayı opsiyonel olarak kapatabilirsin
+     job() # X limitlerini zorlamamak için başlangıçta çalıştırmayı opsiyonel olarak kapatabilirsin
     schedule.every(30).minutes.do(job)
     
     while True:
