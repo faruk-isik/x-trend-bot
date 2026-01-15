@@ -3,33 +3,33 @@ import schedule
 import time
 import os
 import threading
-from openai import OpenAI
+from groq import Groq
 from ddgs import DDGS
 from datetime import datetime
 from flask import Flask
 
 # --- VERSİYON KONTROL ---
-print("VERSION: CHATGPT MODU (V8.0)")
+print("VERSION: GROQ LLAMA 3 MODU (V9.0)")
 
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
 X_API_SECRET = os.getenv("X_API_SECRET")
 X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# --- WEB SUNUCUSU ---
+# --- WEB SUNUCUSU (KOYEB İÇİN) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Calisiyor (ChatGPT Modu)"
+    return "Bot Calisiyor (Groq Llama 3 Modu)"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=8000)
 
-# --- OPENAI CLIENT ---
-client_ai = OpenAI(api_key=OPENAI_API_KEY)
+# --- GROQ CLIENT ---
+client_ai = Groq(api_key=GROQ_API_KEY)
 
 # --- TWITTER BAĞLANTISI ---
 def get_twitter_conn():
@@ -46,38 +46,38 @@ def search_latest_news():
     news_results = []
     try:
         with DDGS() as ddgs:
-            results = ddgs.text("Türkiye gündemi son dakika", region='tr-tr', timelimit='d', max_results=10)
+            # Gündemi yakalamak için aramayı biraz genişlettik
+            results = ddgs.text("Türkiye gündemi son dakika haberler", region='tr-tr', timelimit='d', max_results=10)
             if not results: return None
             for r in results:
-                news_results.append(f"Başlık: {r.get('title','')} - Detay: {r.get('body','')}")
+                news_results.append(f"Haber: {r.get('title','')} - Detay: {r.get('body','')}")
     except Exception as e:
         print(f"Arama hatası: {e}")
         return None
     return "\n".join(news_results)
 
-# --- CHATGPT İLE ANALİZ ---
+# --- GROQ İLE ANALİZ ---
 def analyze_and_write_tweet(raw_data):
     if not raw_data: return "YOK"
 
     try:
-        response = client_ai.chat.completions.create(
-            model="gpt-4o-mini", # En hızlı ve ekonomik model
-messages=[
-    {"role": "system", "content": "Sen aktif bir haber muhabirisin. Haberler arasından güncel bir tanesini seç ve 270 karakterlik ilgi çekici bir tweet oluştur. Sadece haber içeriği çok yetersizse 'YOK' yaz."},
-    {"role": "user", "content": f"Şu haberleri analiz et ve birini paylaş:\n{raw_data}"}
-],
-            max_tokens=150
+        completion = client_ai.chat.completions.create(
+            model="llama-3.3-70b-versatile", # Groq'un en güçlü modellerinden biri
+            messages=[
+                {"role": "system", "content": "Sen tarafsız bir muhabirsin. Haberleri analiz eder ve en önemlisini 270 karakterlik ciddi bir tweet olarak yazarsın. Haber yoksa sadece 'YOK' yaz."},
+                {"role": "user", "content": f"Şu verileri analiz et:\n{raw_data}"}
+            ]
         )
-        return response.choices[0].message.content.strip()
+        return completion.choices[0].message.content.strip()
     except Exception as e:
-        print(f"ChatGPT Hatası: {e}")
+        print(f"Groq Hatası: {e}")
         return "YOK"
 
 last_news_summary = ""
 
 def job():
     global last_news_summary
-    print(f"[{datetime.now()}] Haber taraması başladı...")
+    print(f"[{datetime.now()}] Görev tetiklendi...")
     
     raw_news = search_latest_news()
     if not raw_news: return
@@ -85,11 +85,11 @@ def job():
     tweet_content = analyze_and_write_tweet(raw_news)
     
     if tweet_content == "YOK" or not tweet_content:
-        print("Kayda değer haber yok.")
+        print("Paylaşılacak önemli bir haber bulunamadı.")
         return
 
     if tweet_content == last_news_summary:
-        print("Bu haber zaten atıldı.")
+        print("Bu haber zaten son paylaşılan haberle aynı.")
         return
 
     try:
@@ -98,14 +98,14 @@ def job():
         print(f"Tweet Gönderildi: {tweet_content}")
         last_news_summary = tweet_content
     except Exception as e:
-        print(f"Tweet Hatası: {e}")
+        print(f"Twitter API Hatası (Muhtemelen 429 Limit): {e}")
 
 if __name__ == "__main__":
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
     
-    job()
+    # job() # X limitlerini zorlamamak için başlangıçta çalıştırmayı opsiyonel olarak kapatabilirsin
     schedule.every(30).minutes.do(job)
     
     while True:
