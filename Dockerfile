@@ -1,14 +1,21 @@
 FROM python:3.11-slim
 
-# Çalışma dizini oluştur
 WORKDIR /app
 
-# Gereksinimleri kopyala ve yükle
+# Sistem bağımlılıkları
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python paketleri
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Kodları kopyala
+# Uygulama kodu
 COPY main.py .
 
-# Uygulamayı başlat
-CMD ["python", "-u", "main.py"]
+# Port
+EXPOSE 8000
+
+# Çalıştırma komutu
+CMD ["python", "main.py"]
