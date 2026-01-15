@@ -3,4 +3,4 @@ schedule
 flask
 requests
 ddgs
-openai
+groq
