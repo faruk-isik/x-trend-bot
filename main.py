@@ -10,7 +10,7 @@ from datetime import datetime
 from flask import Flask
 
 # --- VERSİYON KONTROL ---
-print("VERSION: RAW HTTP REQUEST MODU (V5.0)")
+print("VERSION: GEMINI PRO - FINAL (V6.0)")
 
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
@@ -24,7 +24,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Calisiyor (HTTP Request Modu)"
+    return "Bot Calisiyor (Gemini Pro Modu)"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=8000)
@@ -54,13 +54,10 @@ def search_latest_news():
         return None
     return "\n".join(news_results)
 
-# --- GEMINI (MANUEL HTTP İSTEĞİ) ---
+# --- GEMINI (MANUEL HTTP İSTEĞİ - GEMINI PRO) ---
 def ask_gemini_manual(prompt):
-    """
-    Kütüphane kullanmadan doğrudan Google API'ye bağlanır.
-    Bu yöntem versiyon hatalarından etkilenmez.
-    """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # DEĞİŞİKLİK BURADA: 'gemini-1.5-flash' YERİNE 'gemini-pro' YAZDIK.
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
     
     headers = {'Content-Type': 'application/json'}
     data = {
@@ -74,7 +71,6 @@ def ask_gemini_manual(prompt):
         
         if response.status_code == 200:
             result = response.json()
-            # Cevabın içinden metni ayıkla
             return result['candidates'][0]['content']['parts'][0]['text'].strip()
         else:
             print(f"Gemini API Hatası: {response.status_code} - {response.text}")
