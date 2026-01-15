@@ -47,7 +47,7 @@ def search_latest_news():
     try:
         with DDGS() as ddgs:
             # Gündemi yakalamak için aramayı biraz genişlettik
-            results = ddgs.text("Türkiye gündemi son dakika haberler", region='tr-tr', timelimit='d', max_results=10)
+            results = ddgs.text("Türkiye gündemi son dakika haber başlıkları", region='tr-tr', timelimit='d', max_results=15)
             if not results: return None
             for r in results:
                 news_results.append(f"Haber: {r.get('title','')} - Detay: {r.get('body','')}")
@@ -62,10 +62,15 @@ def analyze_and_write_tweet(raw_data):
 
     try:
         completion = client_ai.chat.completions.create(
-            model="llama-3.3-70b-versatile", # Groq'un en güçlü modellerinden biri
+            model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "Sen tarafsız bir muhabirsin. Haberleri analiz eder ve en önemlisini 270 karakterlik ciddi bir tweet olarak yazarsın. Haber yoksa sadece 'YOK' yaz."},
-                {"role": "user", "content": f"Şu verileri analiz et:\n{raw_data}"}
+                {"role": "system", "content": """Sen Türkiye'nin en aktif ve çevik haber muhabirisin. 
+                GÖREVİN: Sana verilen haberleri tarafsız ama ilgi çekici bir dille özetlemek. 
+                1. İçeriklerden en güncel ve halkı ilgilendiren bir tanesini SEÇ.
+                2. Bu haberi 270 karakterlik, ciddi bir haber ajansı diliyle yaz. 
+                3. Mutlaka bir haber seçmeye çalış, sadece veriler tamamen anlamsızsa 'YOK' yaz. 
+                4. Hashtag kullanma."""},
+                {"role": "user", "content": f"Şu güncel verilerden bir haber bülteni oluştur:\n{raw_data}"}
             ]
         )
         return completion.choices[0].message.content.strip()
