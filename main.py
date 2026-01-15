@@ -246,6 +246,52 @@ def debug_token():
         }
     })
 
+@app.route('/test-content')
+def test_content():
+    """RSS içeriğini test et - DEBUG için"""
+    try:
+        feed = feedparser.parse(NTV_SON_DAKIKA_RSS)
+        if not feed.entries:
+            return "RSS'den veri alınamadı"
+        
+        first_entry = feed.entries[0]
+        
+        # Content alanını kontrol et
+        content_html = ""
+        if hasattr(first_entry, 'content') and first_entry.content:
+            content_html = first_entry.content[0].get('value', '')
+        
+        summary = first_entry.get('summary', '')
+        description = first_entry.get('description', '')
+        
+        # Temizlenmiş içerik
+        clean = clean_html_content(content_html if content_html else summary)
+        
+        return f"""
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body style="font-family: monospace; padding: 20px;">
+        <h2>İlk Haber - İçerik Test</h2>
+        
+        <h3>Başlık:</h3>
+        <p>{first_entry.get('title', '')}</p>
+        
+        <h3>Content (HTML - {len(content_html)} kar):</h3>
+        <pre style="background: #f0f0f0; padding: 10px; overflow-x: auto;">{content_html[:500]}</pre>
+        
+        <h3>Summary ({len(summary)} kar):</h3>
+        <pre style="background: #f0f0f0; padding: 10px;">{summary[:300]}</pre>
+        
+        <h3>Temizlenmiş İçerik ({len(clean)} kar):</h3>
+        <p style="background: #e8f5e9; padding: 15px; border-left: 4px solid #4caf50;">{clean[:500]}</p>
+        
+        <a href="/" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 5px;">← Ana Sayfa</a>
+        </body>
+        </html>
+        """
+    except Exception as e:
+        return f"Hata: {e}"
+
 @app.route('/trigger', methods=['POST', 'GET'])
 def trigger_tweet():
     global is_busy
@@ -359,6 +405,21 @@ def is_similar_to_recent(title, threshold=SIMILARITY_THRESHOLD):
             return True
     return False
 
+# --- HTML TEMİZLEME ---
+def clean_html_content(html_text):
+    """HTML etiketlerini temizle ve düz metin al"""
+    import re
+    # HTML etiketlerini kaldır
+    text = re.sub(r'<[^>]+>', '', html_text)
+    # Özel karakterleri düzelt
+    text = text.replace('&nbsp;', ' ')
+    text = text.replace('&quot;', '"')
+    text = text.replace('&amp;', '&')
+    text = text.replace('&#39;', "'")
+    # Çoklu boşlukları tek boşluğa indir
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
 # --- NTV SON DAKİKA HABERLER ---
 def fetch_ntv_breaking_news():
     """NTV Son Dakika RSS'den haberleri çek"""
@@ -374,18 +435,29 @@ def fetch_ntv_breaking_news():
         news_list = []
         for entry in feed.entries[:15]:  # İlk 15 haber
             title = entry.get('title', '').strip()
-            description = entry.get('summary', entry.get('description', '')).strip()
+            
+            # İçerik alanlarını dene (content > summary > description)
+            content = ""
+            if hasattr(entry, 'content') and entry.content:
+                content = entry.content[0].get('value', '')
+            if not content:
+                content = entry.get('summary', entry.get('description', ''))
+            
+            # HTML'i temizle
+            full_content = clean_html_content(content)
+            
             link = entry.get('link', '')
             pub_date = entry.get('published', '')
             
             if not title or len(title) < 15:
                 continue
             
-            news_hash = create_news_hash(title, description)
+            # Hash için başlık + içerik kullan
+            news_hash = create_news_hash(title, full_content[:200])
             
             news_list.append({
                 'title': title,
-                'description': description,
+                'full_content': full_content,  # TAM İÇERİK
                 'link': link,
                 'pub_date': pub_date,
                 'hash': news_hash
@@ -425,16 +497,33 @@ def create_tweet_with_groq(news):
     """Groq AI ile haberi tweet formatına dönüştür"""
     
     try:
+        # İçerik varsa onu kullan, yoksa başlık
+        content_to_use = news.get('full_content', '')
+        if not content_to_use or len(content_to_use) < 50:
+            content_to_use = news['title']
+        
+        # Çok uzunsa kısalt (Groq'a gönderirken)
+        if len(content_to_use) > 2000:
+            content_to_use = content_to_use[:2000] + "..."
+        
         prompt = f"""
 Haber Başlığı: {news['title']}
-Haber Detayı: {news['description']}
-Kaynak: NTV
 
-Yukarıdaki haberi 270 karakter içinde, objektif ve çarpıcı bir dille özetle.
-- Haberin özünü koru
-- Gereksiz kelimeler kullanma
-- Hashtag KULLANMA
-- Sadece haber metnini yaz, başka hiçbir şey yazma
+Haber İçeriği:
+{content_to_use}
+
+Yukarıdaki haberi TAM 280 karakter kullanarak özetle.
+
+KURALLAR:
+1. TAM 280 karaktere yakın kullan (270-280 arası ideal)
+2. Haberin ÖNEMLİ detaylarını içer
+3. Sayılar, isimler, yerler gibi somut bilgileri ekle
+4. Gereksiz kelime kullanma
+5. Hashtag KULLANMA
+6. Sadece haber özeti yaz, başka hiçbir şey yazma
+
+ÖRNEK FORMAT:
+"Ekonomi Bakanı Mehmet Şimşek, enflasyonla mücadele kapsamında yeni teşvik paketini açıkladı. Pakette KOBİ'lere 5 milyar TL destek, ihracatçılara vergi indirimi ve tarım sektörüne ucuz kredi imkanı yer alıyor. Paket 1 Şubat'ta yürürlüğe girecek."
 """
         
         completion = client_ai.chat.completions.create(
@@ -442,7 +531,11 @@ Yukarıdaki haberi 270 karakter içinde, objektif ve çarpıcı bir dille özetl
             messages=[
                 {
                     "role": "system",
-                    "content": "Sen profesyonel bir haber editörüsün. Haberleri kısa, öz ve çarpıcı şekilde özetlersin."
+                    "content": """Sen profesyonel bir haber editörüsün. 
+Haberleri 280 karakterlik tweet formatında özetliyorsun.
+Her karakteri verimli kullan, gereksiz kelime ekleme.
+Somut bilgileri (sayı, isim, yer) mutlaka ekle.
+Okuyucu haberin tüm önemli detaylarını anlamalı."""
                 },
                 {
                     "role": "user",
@@ -450,16 +543,26 @@ Yukarıdaki haberi 270 karakter içinde, objektif ve çarpıcı bir dille özetl
                 }
             ],
             temperature=0.7,
-            max_tokens=200
+            max_tokens=400
         )
         
         tweet_text = completion.choices[0].message.content.strip()
         
-        # Karakter limiti kontrolü
-        if len(tweet_text) > 280:
-            tweet_text = tweet_text[:277] + "..."
+        # Tırnak işaretlerini kaldır (bazen AI tırnak içinde yazar)
+        tweet_text = tweet_text.strip('"').strip("'")
         
-        logger.info(f"✅ Tweet oluşturuldu: {tweet_text[:50]}...")
+        # Karakter limiti kontrolü - SERT
+        if len(tweet_text) > 280:
+            logger.warning(f"Tweet çok uzun ({len(tweet_text)} kar), kısaltılıyor...")
+            # Cümle sonunda kes
+            tweet_text = tweet_text[:277].rsplit('.', 1)[0] + '...'
+            # Eğer hala uzunsa, zorla kes
+            if len(tweet_text) > 280:
+                tweet_text = tweet_text[:277] + '...'
+        
+        char_count = len(tweet_text)
+        logger.info(f"✅ Tweet oluşturuldu ({char_count} karakter): {tweet_text[:60]}...")
+        
         return tweet_text
         
     except Exception as e:
@@ -521,7 +624,8 @@ def job(manual=False):
         logger.info("=" * 60)
         logger.info(f"✅ {trigger_type} TWEET GÖNDERİLDİ!")
         logger.info(f"📰 Haber: {selected_news['title'][:60]}...")
-        logger.info(f"🐦 Tweet: {tweet_text}")
+        logger.info(f"📝 İçerik uzunluğu: {len(selected_news.get('full_content', ''))} karakter")
+        logger.info(f"🐦 Tweet ({len(tweet_text)} kar): {tweet_text}")
         logger.info("=" * 60)
         
     except tweepy.errors.TooManyRequests:
