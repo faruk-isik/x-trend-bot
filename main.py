@@ -8,6 +8,9 @@ from duckduckgo_search import DDGS
 from datetime import datetime
 from flask import Flask
 
+# --- VERSİYON KONTROL ---
+print("VERSION: YENI KOD CALISTI (Google GenAI v1)")
+
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
 X_API_SECRET = os.getenv("X_API_SECRET")
@@ -15,18 +18,17 @@ X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# --- KOYEB'İ AYAKTA TUTACAK WEB SUNUCUSU ---
+# --- KOYEB WEB SUNUCUSU ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Aktif ve Calisiyor! (v3.0)"
+    return "Bot Aktif! (v4.0 Final)"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=8000)
 
-# --- GEMINI (YENİ NESİL) AYARLARI ---
-# Artık eski 'configure' yok, yeni Client yapısı var.
+# --- GEMINI (YENI NESIL CLIENT) ---
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 last_news_summary = ""
@@ -44,11 +46,10 @@ def search_latest_news():
     news_results = []
     try:
         with DDGS() as ddgs:
-            # 'd' = son 1 gün. 
+            # 'd' = Son 1 gün
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
             
-            if not results:
-                return None
+            if not results: return None
 
             for r in results:
                 title = r.get('title', '')
@@ -67,18 +68,19 @@ def analyze_and_write_tweet(raw_data):
     prompt = f"""
     Sen Türkiye'nin en güvenilir haber muhabirisin.
     Aşağıdaki son dakika haberlerinden EN ÖNEMLİ, ulusal gündemi etkileyen TEK BİR olayı seç.
-    Magazin ve 3. sayfa haberlerini görmezden gel.
     
-    Seçtiğin haberi tarafsız, net ve ciddi bir dille 270 karakteri geçmeyecek şekilde yaz.
-    Yorum katma, sadece olguyu aktar. Hashtag kullanma.
-    Haber değeri taşıyan ciddi bir şey yoksa sadece "YOK" yaz.
+    Seçtiğin haberi tarafsız, net ve ciddi bir dille, bir haber ajansı diliyle yaz.
+    Yorum katma, sadece olguyu aktar.
+    Uzunluk: Maksimum 270 karakter.
+    Hashtag: Kullanma.
+    Haber değeri yoksa sadece "YOK" yaz.
     
     VERİLER:
     {raw_data}
     """
     
     try:
-        # YENİ KÜTÜPHANE SÖZ DİZİMİ
+        # YENİ KOD YAPISI BURASI
         response = client_gemini.models.generate_content(
             model="gemini-1.5-flash",
             contents=prompt
@@ -117,17 +119,13 @@ def job():
     except Exception as e:
         print(f"Tweet Hatası: {e}")
 
-# --- ANA ÇALIŞMA BLOĞU ---
 if __name__ == "__main__":
-    print("Sistem Başlatılıyor (Yeni Google GenAI)...")
-    
-    # 1. Web sunucusunu başlat
+    print("Sistem Başlatılıyor...")
     t = threading.Thread(target=run_web_server)
     t.daemon = True
     t.start()
     
-    # 2. Botu başlat
-    job()
+    job() # İlk test
     schedule.every(30).minutes.do(job)
     
     while True:
