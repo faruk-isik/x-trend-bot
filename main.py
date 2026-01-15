@@ -3,31 +3,33 @@ import schedule
 import time
 import os
 import threading
-import requests
-import json
+from openai import OpenAI
 from duckduckgo_search import DDGS
 from datetime import datetime
 from flask import Flask
 
 # --- VERSİYON KONTROL ---
-print("VERSION: AUTO-MODEL SELECTOR (V7.0)")
+print("VERSION: CHATGPT MODU (V8.0)")
 
 # --- AYARLAR ---
 X_API_KEY = os.getenv("X_API_KEY")
 X_API_SECRET = os.getenv("X_API_SECRET")
 X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # --- WEB SUNUCUSU ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot Calisiyor (Multi-Model Modu)"
+    return "Bot Calisiyor (ChatGPT Modu)"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=8000)
+
+# --- OPENAI CLIENT ---
+client_ai = OpenAI(api_key=OPENAI_API_KEY)
 
 # --- TWITTER BAĞLANTISI ---
 def get_twitter_conn():
@@ -44,76 +46,32 @@ def search_latest_news():
     news_results = []
     try:
         with DDGS() as ddgs:
-            # Son 1 gün
             results = ddgs.text("Türkiye son dakika haberleri -magazin -spor", region='tr-tr', timelimit='d', max_results=10)
             if not results: return None
             for r in results:
-                title = r.get('title', 'Basliksiz')
-                body = r.get('body', 'Detaysiz')
-                news_results.append(f"Başlık: {title} - Detay: {body}")
+                news_results.append(f"Başlık: {r.get('title','')} - Detay: {r.get('body','')}")
     except Exception as e:
         print(f"Arama hatası: {e}")
         return None
     return "\n".join(news_results)
 
-# --- GEMINI (AKILLI MODEL SEÇİCİ) ---
-def ask_gemini_manual(prompt):
-    # Denenecek Modeller Listesi (Sırayla dener)
-    models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-1.0-pro",
-        "gemini-pro"
-    ]
-    
-    headers = {'Content-Type': 'application/json'}
-    data = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
-
-    # Döngü: Modelleri tek tek dener
-    for model_name in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
-        
-        try:
-            # print(f"Deneniyor: {model_name}...") 
-            response = requests.post(url, headers=headers, data=json.dumps(data))
-            
-            if response.status_code == 200:
-                result = response.json()
-                print(f"BAŞARILI! Çalışan Model: {model_name}")
-                return result['candidates'][0]['content']['parts'][0]['text'].strip()
-            
-            elif response.status_code == 404:
-                # 404 hatası model bulunamadı demektir, bir sonrakine geç
-                print(f"Model bulunamadı ({model_name}), bir sonrakine geçiliyor...")
-                continue
-            else:
-                # Başka bir hata varsa (örn: Yetki hatası) yazdır ama devam et
-                print(f"Hata ({model_name}): {response.status_code} - {response.text}")
-                continue
-                
-        except Exception as e:
-            print(f"Bağlantı hatası ({model_name}): {e}")
-            continue
-    
-    # Döngü bitti ve hiçbiri çalışmadıysa
-    return "YOK"
-
+# --- CHATGPT İLE ANALİZ ---
 def analyze_and_write_tweet(raw_data):
     if not raw_data: return "YOK"
 
-    prompt = f"""
-    Sen Türkiye'nin en güvenilir haber muhabirisin.
-    Aşağıdaki son dakika haberlerinden EN ÖNEMLİ, ulusal gündemi etkileyen TEK BİR olayı seç.
-    Seçtiğin haberi tarafsız, net ve ciddi bir dille, yorum katmadan 270 karakteri geçmeyecek şekilde yaz.
-    Haber değeri yoksa "YOK" yaz.
-    VERİLER: {raw_data}
-    """
-    
-    return ask_gemini_manual(prompt)
+    try:
+        response = client_ai.chat.completions.create(
+            model="gpt-4o-mini", # En hızlı ve ekonomik model
+            messages=[
+                {"role": "system", "content": "Sen tarafsız ve ciddi bir haber muhabirisin. Sana verilen haberlerden en önemli olanı seçip 270 karakterlik bir tweet oluşturursun. Haber değeri yoksa sadece 'YOK' yazarsın."},
+                {"role": "user", "content": f"Aşağıdaki verileri analiz et ve tek bir haber paylaş:\n{raw_data}"}
+            ],
+            max_tokens=150
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"ChatGPT Hatası: {e}")
+        return "YOK"
 
 last_news_summary = ""
 
@@ -122,26 +80,22 @@ def job():
     print(f"[{datetime.now()}] Haber taraması başladı...")
     
     raw_news = search_latest_news()
-    if not raw_news:
-        print("Haber bulunamadı.")
-        return
+    if not raw_news: return
 
     tweet_content = analyze_and_write_tweet(raw_news)
     
     if tweet_content == "YOK" or not tweet_content:
-        print("Kayda değer haber yok veya Gemini yanıt veremedi.")
+        print("Kayda değer haber yok.")
         return
 
     if tweet_content == last_news_summary:
         print("Bu haber zaten atıldı.")
         return
 
-    print(f"Tweet Hazır: {tweet_content}")
-
     try:
         client = get_twitter_conn()
         client.create_tweet(text=tweet_content)
-        print("Tweet Gönderildi!")
+        print(f"Tweet Gönderildi: {tweet_content}")
         last_news_summary = tweet_content
     except Exception as e:
         print(f"Tweet Hatası: {e}")
