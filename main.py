@@ -247,6 +247,19 @@ def status():
         "uptime": "Bot çalışıyor"
     })
 
+@app.route('/debug-token')
+def debug_token():
+    """Token debug endpoint'i - SİLİNECEK (güvenlik riski!)"""
+    return jsonify({
+        "secret_token_set": bool(SECRET_TOKEN and SECRET_TOKEN != "default_secret_change_this"),
+        "secret_token_length": len(SECRET_TOKEN) if SECRET_TOKEN else 0,
+        "env_vars_loaded": {
+            "X_API_KEY": bool(X_API_KEY),
+            "GROQ_API_KEY": bool(GROQ_API_KEY),
+            "SECRET_TOKEN": bool(SECRET_TOKEN)
+        }
+    })
+
 @app.route('/trigger', methods=['POST', 'GET'])
 def trigger_tweet():
     """Manuel tweet tetikleme endpoint'i (POST veya GET)"""
@@ -258,16 +271,22 @@ def trigger_tweet():
     else:
         token = request.headers.get('X-Secret-Token') or request.json.get('secret_token') if request.json else None
     
-    if token != SECRET_TOKEN:
-        logger.warning(f"Yetkisiz tetikleme denemesi! IP: {request.remote_addr}")
-        return """
-        <html>
-        <body style="font-family: Arial; text-align: center; padding: 50px;">
-            <h1>❌ Yetkisiz Erişim</h1>
-            <p>Geçersiz token!</p>
-        </body>
-        </html>
-        """, 401
+    # Token kontrolü (eğer SECRET_TOKEN tanımlıysa)
+    if SECRET_TOKEN and SECRET_TOKEN != "default_secret_change_this":
+        if token != SECRET_TOKEN:
+            logger.warning(f"Yetkisiz tetikleme denemesi! IP: {request.remote_addr}, Token: {token}")
+            return f"""
+            <html>
+            <body style="font-family: Arial; text-align: center; padding: 50px;">
+                <h1>❌ Yetkisiz Erişim</h1>
+                <p>Geçersiz token!</p>
+                <p style="color: #999; font-size: 12px;">Debug: Token={token}, Expected={SECRET_TOKEN[:5]}...</p>
+                <a href="/debug-token">🔍 Token Debug</a>
+            </body>
+            </html>
+            """, 401
+    else:
+        logger.warning("⚠️ SECRET_TOKEN tanımlı değil! Herkes tetikleyebilir!")
     
     # İşlem kilidi kontrolü
     if is_busy:
@@ -396,12 +415,19 @@ def search_latest_news(retry_count=0):
     news_results = []
     
     try:
+        # Rate limit'i önlemek için biraz bekle
+        if retry_count > 0:
+            wait_time = retry_count * 30  # Her denemede 30 saniye daha
+            logger.info(f"Rate limit nedeniyle {wait_time} saniye bekleniyor...")
+            time.sleep(wait_time)
+        
         with DDGS() as ddgs:
             results = ddgs.text(
                 "Türkiye gündemi son dakika haber", 
                 region='tr-tr', 
                 timelimit='d', 
-                max_results=15
+                max_results=10,  # 15'ten 10'a düşürdük
+                backend='api'  # API backend kullan
             )
             
             if not results:
@@ -413,9 +439,25 @@ def search_latest_news(retry_count=0):
                 body = r.get('body', '')
                 source = r.get('href', '')
                 news_results.append(f"Başlık: {title}\nDetay: {body}\nKaynak: {source}\n---")
+            
+            # Rate limit'i önlemek için küçük bekleme
+            time.sleep(2)
                 
     except Exception as e:
-        logger.error(f"Arama hatası (deneme {retry_count + 1}): {e}")
+        error_msg = str(e)
+        logger.error(f"Arama hatası (deneme {retry_count + 1}): {error_msg}")
+        
+        # Rate limit hatası özel olarak işle
+        if "ratelimit" in error_msg.lower() or "202" in error_msg:
+            if retry_count < MAX_RETRIES:
+                logger.warning(f"Rate limit! {(retry_count + 1) * 30} saniye beklenecek...")
+                time.sleep((retry_count + 1) * 30)
+                return search_latest_news(retry_count + 1)
+            else:
+                logger.error("Rate limit aşımı, görev iptal edildi")
+                return None
+        
+        # Diğer hatalar için normal retry
         if retry_count < MAX_RETRIES:
             time.sleep(RETRY_DELAY)
             return search_latest_news(retry_count + 1)
