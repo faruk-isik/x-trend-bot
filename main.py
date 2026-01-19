@@ -44,7 +44,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- VERSİYON ---
-VERSION = "14.1 - Resim Fix"
+VERSION = "14.2 - 640x360 Resim Destekli"
 logger.info(f"VERSION: {VERSION}")
 
 # --- AYARLAR ---
@@ -263,7 +263,6 @@ def fetch_ntv_breaking_news():
             image_url = None
             
             # 1. EN İYİ SEÇENEK: Sizin bulduğunuz 640x360 etiketi
-            # Bu, Twitter için mükemmel bir 16:9 orandır.
             if 'img640x360' in entry:
                 image_url = entry.img640x360
                 logger.info(f"🎯 640x360 Resim Bulundu: {title[:15]}...")
@@ -271,10 +270,38 @@ def fetch_ntv_breaking_news():
             # 2. YEDEK SEÇENEK: Eğer 640x360 yoksa 300x300'e bak
             elif 'img300x300' in entry:
                 image_url = entry.img300x300
-                # Yine de şansımızı deneyip bunu büyütmeyi deneyebiliriz
                 if image_url and "300x300" in image_url:
                     image_url = image_url.replace("300x300", "640xauto")
-                logger.info(f"🔎 300x300 Resim Bulundu (Yedek): {title[:15
+                # İŞTE HATALI SATIRIN DÜZELTİLMİŞ HALİ BURADA:
+                logger.info(f"🔎 300x300 Resim Bulundu (Yedek): {title[:15]}...")
+
+            # 3. YÖNTEM: Standart RSS Media etiketi
+            if not image_url and 'media_content' in entry and entry.media_content:
+                image_url = entry.media_content[0]['url']
+                
+            # 4. YÖNTEM: HTML içinden Regex ile
+            if not image_url:
+                import re
+                img_match = re.search(r'<img.*?src=["\'](.*?)["\']', full_html)
+                if img_match:
+                    image_url = img_match.group(1)
+
+            if not title or len(title) < 15: continue
+            
+            news_list.append({
+                'title': title,
+                'full_content': content,
+                'link': entry.get('link', ''),
+                'image_url': image_url,
+                'hash': create_news_hash(title, content[:200])
+            })
+            
+        logger.info(f"✅ Toplam {len(news_list)} haber işlendi.")
+        return news_list
+        
+    except Exception as e:
+        logger.error(f"RSS hatası: {e}")
+        return []
 
 def select_untweeted_news(news_list):
     suitable = [n for n in news_list if n['hash'] not in tweeted_news_hashes]
@@ -297,7 +324,7 @@ def create_tweet_with_groq(news):
         logger.error(f"Groq hatası: {e}")
         return None
 
-# --- ANA GÖREV (DÜZELTİLDİ) ---
+# --- ANA GÖREV ---
 def job(source="MANUEL"):
     global last_news_summary, last_tweet_time, is_busy, tweeted_news_hashes, tweet_log
     
@@ -322,7 +349,7 @@ def job(source="MANUEL"):
                 tweeted_news_hashes.add(selected_news['hash'])
                 continue
             
-            # --- RESİM İŞLEMLERİ (YENİ EKLENDİ) ---
+            # --- RESİM İŞLEMLERİ ---
             media_id = None
             if selected_news.get('image_url'):
                 img_data = download_and_process_image(selected_news['image_url'])
