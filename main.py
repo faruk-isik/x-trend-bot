@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- VERSİYON ---
-VERSION = "13.0 - Cron-Job Tetikleme Modu"
+VERSION = "13.1 - Gelişmiş Tekrar Kontrolü"
 logger.info(f"VERSION: {VERSION}")
 
 # --- AYARLAR ---
@@ -437,13 +437,30 @@ def create_news_hash(title, description):
     content = f"{title}|{description}".lower()
     return hashlib.md5(content.encode()).hexdigest()
 
-# --- BENZERLİK KONTROLÜ ---
+# --- BENZERLİK KONTROLÜ (GELİŞTİRİLMİŞ) ---
 def is_similar_to_recent(title, threshold=SIMILARITY_THRESHOLD):
+    """Son tweet'lenen haberlerle benzerlik kontrolü"""
     for recent_title in recent_news_titles:
         ratio = SequenceMatcher(None, title.lower(), recent_title.lower()).ratio()
         if ratio > threshold:
-            logger.info(f"Benzer haber bulundu: {ratio:.2f} benzerlik")
+            logger.info(f"❌ Benzer başlık bulundu: {ratio:.2f} benzerlik")
             return True
+    return False
+
+def is_duplicate_tweet(new_tweet_text, threshold=0.80):
+    """Tweet metninin daha önce atılıp atılmadığını kontrol et"""
+    if not tweet_log:
+        return False
+    
+    for log_entry in tweet_log:
+        old_tweet = log_entry['tweet']
+        ratio = SequenceMatcher(None, new_tweet_text.lower(), old_tweet.lower()).ratio()
+        if ratio > threshold:
+            logger.warning(f"⚠️ TEKRAR TWEET TESPİT EDİLDİ! Benzerlik: {ratio:.2f}")
+            logger.warning(f"Eski: {old_tweet[:60]}...")
+            logger.warning(f"Yeni: {new_tweet_text[:60]}...")
+            return True
+    
     return False
 
 # --- HTML TEMİZLEME ---
@@ -503,22 +520,36 @@ def fetch_ntv_breaking_news():
         logger.error(f"NTV RSS hatası: {e}")
         return []
 
-# --- TWEET İÇİN HABER SEÇ ---
+# --- TWEET İÇİN HABER SEÇ (GELİŞTİRİLMİŞ) ---
 def select_untweeted_news(news_list):
-    for news in news_list:
-        if news['hash'] in tweeted_news_hashes:
-            logger.info(f"Atlandı (hash): {news['title'][:50]}...")
-            continue
-        
-        if is_similar_to_recent(news['title']):
-            logger.info(f"Atlandı (benzer): {news['title'][:50]}...")
-            continue
-        
-        logger.info(f"✅ Seçildi: {news['title'][:50]}...")
-        return news
+    """Daha önce tweet'lenmemiş ve benzersiz haberi seç"""
     
-    logger.warning("Hiçbir yeni haber bulunamadı, en günceli tekrar işlenecek...")
-    return news_list[0] if news_list else None
+    suitable_news = []
+    
+    for news in news_list:
+        # 1. Hash kontrolü (aynı haber mi?)
+        if news['hash'] in tweeted_news_hashes:
+            logger.info(f"⏭️ Atlandı (hash): {news['title'][:50]}...")
+            continue
+        
+        # 2. Başlık benzerlik kontrolü
+        if is_similar_to_recent(news['title']):
+            logger.info(f"⏭️ Atlandı (benzer başlık): {news['title'][:50]}...")
+            continue
+        
+        # Bu haber uygun, listeye ekle
+        suitable_news.append(news)
+    
+    if not suitable_news:
+        logger.warning("⚠️ Hiçbir yeni haber bulunamadı!")
+        return None
+    
+    logger.info(f"✅ {len(suitable_news)} adet uygun haber bulundu")
+    
+    # En güncel haberi döndür
+    selected = suitable_news[0]
+    logger.info(f"✅ Seçildi: {selected['title'][:50]}...")
+    return selected
 
 # --- GROQ İLE TWEET OLUŞTUR ---
 def create_tweet_with_groq(news):
@@ -593,6 +624,7 @@ def job(source="MANUEL"):
         return
     
     is_busy = True
+    max_attempts = 5  # En fazla 5 farklı haber dene
     
     try:
         logger.info("=" * 60)
@@ -600,54 +632,83 @@ def job(source="MANUEL"):
         
         news_list = fetch_ntv_breaking_news()
         if not news_list:
-            logger.error("Haber alınamadı, görev iptal")
+            logger.error("❌ Haber alınamadı, görev iptal")
             return
         
-        selected_news = select_untweeted_news(news_list)
-        if not selected_news:
-            logger.error("Uygun haber bulunamadı")
+        # Uygun haber bul ve tweet oluştur (tekrar kontrolü ile)
+        for attempt in range(max_attempts):
+            logger.info(f"--- Deneme {attempt + 1}/{max_attempts} ---")
+            
+            selected_news = select_untweeted_news(news_list)
+            if not selected_news:
+                logger.error("❌ Uygun haber bulunamadı")
+                return
+            
+            # Tweet oluştur
+            tweet_text = create_tweet_with_groq(selected_news)
+            if not tweet_text:
+                logger.error("❌ Tweet oluşturulamadı")
+                # Bu haberi hash'e ekle ki bir daha denemesin
+                tweeted_news_hashes.add(selected_news['hash'])
+                continue
+            
+            # ÖNEMLİ: Tweet tekrar kontrolü
+            if is_duplicate_tweet(tweet_text):
+                logger.warning("🔄 Bu tweet daha önce atıldı, başka haber deneniyor...")
+                # Bu haberi hash'e ekle
+                tweeted_news_hashes.add(selected_news['hash'])
+                recent_news_titles.append(selected_news['title'])
+                if len(recent_news_titles) > 20:
+                    recent_news_titles.pop(0)
+                continue
+            
+            # Tweet benzersiz! Twitter'a gönder
+            logger.info("✅ Tweet benzersiz, Twitter'a gönderiliyor...")
+            
+            client = get_twitter_conn()
+            if not client:
+                logger.error("❌ Twitter bağlantısı kurulamadı")
+                return
+            
+            response = client.create_tweet(text=tweet_text)
+            
+            # Başarılı! Kayıtları güncelle
+            tweeted_news_hashes.add(selected_news['hash'])
+            recent_news_titles.append(selected_news['title'])
+            
+            if len(recent_news_titles) > 20:
+                recent_news_titles.pop(0)
+            
+            tweet_log.append({
+                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'tweet': tweet_text
+            })
+            
+            if len(tweet_log) > 10:
+                tweet_log.pop(0)
+            
+            last_news_summary = tweet_text
+            last_tweet_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            logger.info("=" * 60)
+            logger.info(f"✅ {source} TWEET GÖNDERİLDİ!")
+            logger.info(f"📰 Haber: {selected_news['title'][:60]}...")
+            logger.info(f"🐦 Tweet ({len(tweet_text)} kar): {tweet_text}")
+            logger.info("=" * 60)
+            
+            # Başarılı, döngüden çık
             return
         
-        tweet_text = create_tweet_with_groq(selected_news)
-        if not tweet_text:
-            logger.error("Tweet oluşturulamadı")
-            return
-        
-        client = get_twitter_conn()
-        if not client:
-            logger.error("Twitter bağlantısı kurulamadı")
-            return
-        
-        response = client.create_tweet(text=tweet_text)
-        
-        tweeted_news_hashes.add(selected_news['hash'])
-        recent_news_titles.append(selected_news['title'])
-        
-        if len(recent_news_titles) > 20:
-            recent_news_titles.pop(0)
-        
-        tweet_log.append({
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'tweet': tweet_text
-        })
-        
-        if len(tweet_log) > 10:
-            tweet_log.pop(0)
-        
-        last_news_summary = tweet_text
-        last_tweet_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        logger.info("=" * 60)
-        logger.info(f"✅ {source} TWEET GÖNDERİLDİ!")
-        logger.info(f"📰 Haber: {selected_news['title'][:60]}...")
-        logger.info(f"🐦 Tweet ({len(tweet_text)} kar): {tweet_text}")
-        logger.info("=" * 60)
+        # 5 deneme sonunda hala tweet atılamadıysa
+        logger.error(f"❌ {max_attempts} deneme sonunda uygun haber bulunamadı!")
         
     except tweepy.errors.TooManyRequests:
-        logger.error("Twitter rate limit aşıldı!")
+        logger.error("❌ Twitter rate limit aşıldı!")
         
     except Exception as e:
-        logger.error(f"Hata: {e}")
+        logger.error(f"❌ Hata: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         
     finally:
         is_busy = False
