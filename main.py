@@ -10,6 +10,9 @@ import pytz
 from flask import Flask, jsonify, request
 from difflib import SequenceMatcher
 import hashlib
+import requests
+from io import BytesIO
+from PIL import Image
 
 # --- TÜRKIYE SAAT DİLİMİ ---
 TR_TZ = pytz.timezone('Europe/Istanbul')
@@ -46,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- VERSİYON ---
-VERSION = "13.1 - Gelişmiş Tekrar Kontrolü"
+VERSION = "14.0 - Resimli Tweet Desteği"
 logger.info(f"VERSION: {VERSION}")
 
 # --- AYARLAR ---
@@ -58,7 +61,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SECRET_TOKEN = os.getenv("SECRET_TOKEN", "default_secret_change_this")
 CRON_SECRET = os.getenv("CRON_SECRET", SECRET_TOKEN)  # Cron için ayrı token
 
-# MYNET Son Dakika RSS
+# NTV Son Dakika RSS
 MYNET_SON_DAKIKA_RSS = "https://www.mynet.com/haber/rss/sondakika"
 
 SIMILARITY_THRESHOLD = 0.75
@@ -242,7 +245,7 @@ def home():
             <div class="info-grid">
                 <div class="info-card">
                     <h3>📌 Versiyon</h3>
-                    <p>13.1</p>
+                    <p>14.0</p>
                 </div>
                 <div class="info-card">
                     <h3>🕐 Son Tweet</h3>
@@ -253,8 +256,8 @@ def home():
                     <p>{len(tweeted_news_hashes)} adet</p>
                 </div>
                 <div class="info-card">
-                    <h3>📰 Kaynak</h3>
-                    <p style="font-size: 13px;">Mynet</p>
+                    <h3>📷 Özellik</h3>
+                    <p style="font-size: 13px;">Resimli</p>
                 </div>
             </div>
 
@@ -457,7 +460,71 @@ def get_twitter_conn():
         logger.error(f"Twitter bağlantı hatası: {e}")
         return None
 
-# --- HABER HASH OLUŞTUR ---
+def get_twitter_api_v1():
+    """Twitter API v1.1 - Medya yükleme için"""
+    try:
+        import tweepy
+        auth = tweepy.OAuth1UserHandler(
+            X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET
+        )
+        return tweepy.API(auth)
+    except Exception as e:
+        logger.error(f"Twitter API v1 bağlantı hatası: {e}")
+        return None
+
+# --- RESİM İNDİRME VE İŞLEME ---
+def download_and_process_image(image_url):
+    """Resmi indir ve Twitter için hazırla"""
+    try:
+        logger.info(f"📷 Resim indiriliyor: {image_url[:60]}...")
+        
+        # Resmi indir
+        response = requests.get(image_url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        if response.status_code != 200:
+            logger.warning(f"Resim indirilemedi: HTTP {response.status_code}")
+            return None
+        
+        # Resmi aç
+        img = Image.open(BytesIO(response.content))
+        
+        # Twitter limitleri: Max 5MB, boyut kontrolü
+        if len(response.content) > 5 * 1024 * 1024:  # 5MB
+            logger.warning("Resim çok büyük (>5MB), boyutlandırılıyor...")
+            # Resmi küçült
+            img.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+        
+        # JPEG formatına çevir (Twitter uyumluluğu)
+        output = BytesIO()
+        if img.mode in ('RGBA', 'LA', 'P'):
+            img = img.convert('RGB')
+        img.save(output, format='JPEG', quality=85, optimize=True)
+        output.seek(0)
+        
+        logger.info(f"✅ Resim hazırlandı ({len(output.getvalue()) / 1024:.1f} KB)")
+        return output
+        
+    except Exception as e:
+        logger.error(f"❌ Resim işleme hatası: {e}")
+        return None
+
+def upload_media_to_twitter(image_data):
+    """Resmi Twitter'a yükle ve media_id döndür"""
+    try:
+        api_v1 = get_twitter_api_v1()
+        if not api_v1:
+            return None
+        
+        logger.info("📤 Resim Twitter'a yükleniyor...")
+        media = api_v1.media_upload(filename="image.jpg", file=image_data)
+        logger.info(f"✅ Resim yüklendi: media_id={media.media_id}")
+        return media.media_id
+        
+    except Exception as e:
+        logger.error(f"❌ Resim yükleme hatası: {e}")
+        return None
 def create_news_hash(title, description):
     content = f"{title}|{description}".lower()
     return hashlib.md5(content.encode()).hexdigest()
@@ -499,15 +566,15 @@ def clean_html_content(html_text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-# --- MYNET SON DAKİKA HABERLER ---
+# --- NTV SON DAKİKA HABERLER ---
 def fetch_ntv_breaking_news():
-    logger.info("📺 MYNET Son Dakika haberleri çekiliyor...")
+    logger.info("📺 NTV Son Dakika haberleri çekiliyor...")
     
     try:
-        feed = feedparser.parse(MYNET_SON_DAKIKA_RSS)
+        feed = feedparser.parse(NTV_SON_DAKIKA_RSS)
         
         if not feed.entries:
-            logger.error("MYNET RSS'den haber alınamadı!")
+            logger.error("NTV RSS'den haber alınamadı!")
             return []
         
         news_list = []
@@ -538,11 +605,11 @@ def fetch_ntv_breaking_news():
                 'hash': news_hash
             })
         
-        logger.info(f"✅ {len(news_list)} adet MYNET haberi bulundu")
+        logger.info(f"✅ {len(news_list)} adet NTV haberi bulundu")
         return news_list
         
     except Exception as e:
-        logger.error(f"MYNET RSS hatası: {e}")
+        logger.error(f"NTV RSS hatası: {e}")
         return []
 
 # --- TWEET İÇİN HABER SEÇ (GELİŞTİRİLMİŞ) ---
@@ -719,6 +786,8 @@ def job(source="MANUEL"):
             logger.info(f"✅ {source} TWEET GÖNDERİLDİ!")
             logger.info(f"📰 Haber: {selected_news['title'][:60]}...")
             logger.info(f"🐦 Tweet ({len(tweet_text)} kar): {tweet_text}")
+            if media_id:
+                logger.info(f"📷 Resim: ✅ Eklendi")
             logger.info("=" * 60)
             
             # Başarılı, döngüden çık
