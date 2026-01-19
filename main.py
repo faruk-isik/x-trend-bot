@@ -58,7 +58,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SECRET_TOKEN = os.getenv("SECRET_TOKEN", "default_secret_change_this")
 CRON_SECRET = os.getenv("CRON_SECRET", SECRET_TOKEN)  # Cron için ayrı token
 
-# NTV Son Dakika RSS
+# MYNET Son Dakika RSS
 MYNET_SON_DAKIKA_RSS = "https://www.mynet.com/haber/rss/sondakika"
 
 SIMILARITY_THRESHOLD = 0.75
@@ -499,15 +499,15 @@ def clean_html_content(html_text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-# --- NTV SON DAKİKA HABERLER ---
+# --- MYNET SON DAKİKA HABERLER ---
 def fetch_ntv_breaking_news():
-    logger.info("📺 NTV Son Dakika haberleri çekiliyor...")
+    logger.info("📺 MYNET Son Dakika haberleri çekiliyor...")
     
     try:
-        feed = feedparser.parse(NTV_SON_DAKIKA_RSS)
+        feed = feedparser.parse(MYNET_SON_DAKIKA_RSS)
         
         if not feed.entries:
-            logger.error("NTV RSS'den haber alınamadı!")
+            logger.error("MYNET RSS'den haber alınamadı!")
             return []
         
         news_list = []
@@ -538,11 +538,11 @@ def fetch_ntv_breaking_news():
                 'hash': news_hash
             })
         
-        logger.info(f"✅ {len(news_list)} adet NTV haberi bulundu")
+        logger.info(f"✅ {len(news_list)} adet MYNET haberi bulundu")
         return news_list
         
     except Exception as e:
-        logger.error(f"NTV RSS hatası: {e}")
+        logger.error(f"MYNET RSS hatası: {e}")
         return []
 
 # --- TWEET İÇİN HABER SEÇ (GELİŞTİRİLMİŞ) ---
