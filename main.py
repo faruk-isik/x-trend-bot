@@ -6,18 +6,42 @@ import logging
 from groq import Groq
 import feedparser
 from datetime import datetime
+import pytz
 from flask import Flask, jsonify, request
 from difflib import SequenceMatcher
 import hashlib
 
+# --- TÜRKIYE SAAT DİLİMİ ---
+TR_TZ = pytz.timezone('Europe/Istanbul')
+
+def get_tr_time():
+    """Türkiye saatini döndür"""
+    return datetime.now(TR_TZ)
+
+def get_tr_time_str():
+    """Türkiye saatini string olarak döndür"""
+    return get_tr_time().strftime("%Y-%m-%d %H:%M:%S")
+
 # --- LOGLAMA AYARLARI ---
+class TurkeyTimeFormatter(logging.Formatter):
+    """Türkiye saati ile log formatter"""
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, TR_TZ)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+formatter = TurkeyTimeFormatter('%(asctime)s - %(levelname)s - %(message)s')
+
+file_handler = logging.FileHandler('bot.log')
+file_handler.setFormatter(formatter)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
-    ]
+    handlers=[file_handler, console_handler]
 )
 logger = logging.getLogger(__name__)
 
@@ -281,7 +305,7 @@ def ping():
     """Basit ping endpoint - keep alive için"""
     global total_requests
     total_requests += 1
-    return jsonify({"status": "pong", "timestamp": datetime.now().isoformat()})
+    return jsonify({"status": "pong", "timestamp": get_tr_time_str()})
 
 @app.route('/status')
 def status():
@@ -321,7 +345,7 @@ def cron_trigger():
         }), 200
     
     # Tetikleme zamanını kaydet
-    last_cron_trigger = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    last_cron_trigger = get_tr_time_str()
     
     # Arka planda tweet işini başlat
     thread = threading.Thread(target=job, kwargs={"source": "CRON"})
@@ -414,7 +438,7 @@ def trigger_tweet():
     return jsonify({
         "success": True,
         "message": "Tweet işlemi başlatıldı",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": get_tr_time_str()
     }), 202
 
 # --- GROQ CLIENT ---
@@ -629,7 +653,7 @@ def job(source="MANUEL"):
     
     try:
         logger.info("=" * 60)
-        logger.info(f"{source} GÖREV BAŞLATILDI: {datetime.now()}")
+        logger.info(f"{source} GÖREV BAŞLATILDI: {get_tr_time_str()}")
         
         news_list = fetch_ntv_breaking_news()
         if not news_list:
@@ -681,7 +705,7 @@ def job(source="MANUEL"):
                 recent_news_titles.pop(0)
             
             tweet_log.append({
-                'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'time': get_tr_time_str(),
                 'tweet': tweet_text
             })
             
@@ -689,7 +713,7 @@ def job(source="MANUEL"):
                 tweet_log.pop(0)
             
             last_news_summary = tweet_text
-            last_tweet_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            last_tweet_time = get_tr_time_str()
             
             logger.info("=" * 60)
             logger.info(f"✅ {source} TWEET GÖNDERİLDİ!")
