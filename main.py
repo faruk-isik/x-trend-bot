@@ -1,5 +1,4 @@
 import tweepy
-import schedule
 import time
 import os
 import threading
@@ -23,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- VERSİYON ---
-VERSION = "12.1 - Türkiye Gündemi + Tweet Geçmişi"
+VERSION = "13.0 - Cron-Job Tetikleme Modu"
 logger.info(f"VERSION: {VERSION}")
 
 # --- AYARLAR ---
@@ -33,21 +32,23 @@ X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN")
 X_ACCESS_SECRET = os.getenv("X_ACCESS_SECRET")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SECRET_TOKEN = os.getenv("SECRET_TOKEN", "default_secret_change_this")
+CRON_SECRET = os.getenv("CRON_SECRET", SECRET_TOKEN)  # Cron için ayrı token
 
 # NTV Son Dakika RSS
 NTV_SON_DAKIKA_RSS = "https://www.ntv.com.tr/son-dakika.rss"
 
-SIMILARITY_THRESHOLD = 0.75  # %75 benzerlik
+SIMILARITY_THRESHOLD = 0.75
 MAX_RETRIES = 3
-RETRY_DELAY = 60
 
 # --- GLOBAL DEĞİŞKENLER ---
 last_news_summary = ""
 last_tweet_time = "Henüz tweet atılmadı"
-tweeted_news_hashes = set()  # Hash ile tekrar kontrolü
-recent_news_titles = []  # Son 20 haber başlığı
-tweet_log = []  # Tweet geçmişi (en son 10 tweet)
+tweeted_news_hashes = set()
+recent_news_titles = []
+tweet_log = []
 is_busy = False
+total_requests = 0
+last_cron_trigger = "Henüz tetiklenmedi"
 
 # --- WEB SUNUCUSU ---
 app = Flask(__name__)
@@ -60,7 +61,7 @@ def home():
     # Tweet log'unu HTML'e çevir
     tweet_log_html = ""
     if tweet_log:
-        for log_entry in reversed(tweet_log):  # En yeni üstte
+        for log_entry in reversed(tweet_log):
             tweet_log_html += f"""
             <div class="tweet-log-item">
                 <div class="tweet-time">🕐 {log_entry['time']}</div>
@@ -151,6 +152,26 @@ def home():
                 transform: translateY(-2px);
                 box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
             }}
+            .cron-info {{
+                background: #e8f5e9;
+                padding: 20px;
+                border-radius: 10px;
+                margin: 20px 0;
+                border-left: 4px solid #4caf50;
+            }}
+            .cron-info h3 {{
+                color: #2e7d32;
+                margin-bottom: 10px;
+            }}
+            .cron-info code {{
+                background: white;
+                padding: 10px;
+                border-radius: 5px;
+                display: block;
+                margin: 10px 0;
+                font-size: 13px;
+                word-break: break-all;
+            }}
             .tweet-log {{
                 background: #f8f9fa;
                 padding: 25px;
@@ -197,7 +218,7 @@ def home():
             <div class="info-grid">
                 <div class="info-card">
                     <h3>📌 Versiyon</h3>
-                    <p>{VERSION.split(' - ')[0]}</p>
+                    <p>13.0</p>
                 </div>
                 <div class="info-card">
                     <h3>🕐 Son Tweet</h3>
@@ -207,11 +228,33 @@ def home():
                     <h3>📊 İşlenmiş Haber</h3>
                     <p>{len(tweeted_news_hashes)} adet</p>
                 </div>
+                <div class="info-card">
+                    <h3>⏰ Son Cron</h3>
+                    <p style="font-size: 13px;">{last_cron_trigger}</p>
+                </div>
             </div>
 
             <a href="{trigger_url}" class="trigger-button">
                 🚀 ŞİMDİ TWEET AT
             </a>
+
+            <div class="cron-info">
+                <h3>⏰ Cron-Job.org Kurulumu</h3>
+                <p style="color: #555; margin-bottom: 10px;">
+                    <strong>1.</strong> <a href="https://cron-job.org" target="_blank" style="color: #2e7d32;">cron-job.org</a> sitesine gidin ve ücretsiz kayıt olun<br>
+                    <strong>2.</strong> "Create Cronjob" butonuna tıklayın<br>
+                    <strong>3.</strong> Aşağıdaki ayarları girin:
+                </p>
+                <div style="background: white; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                    <strong>Title:</strong> Türkiye Gündemi Bot<br>
+                    <strong>URL:</strong> <code style="display: inline; padding: 2px 6px; background: #f0f0f0;">https://your-app.koyeb.app/cron?secret={CRON_SECRET}</code><br>
+                    <strong>Schedule:</strong> Every 1 hour (Her 1 saatte)<br>
+                    <strong>Enabled:</strong> ✅ Aktif
+                </div>
+                <p style="color: #666; font-size: 13px; margin-top: 10px;">
+                    💡 <strong>İpucu:</strong> URL'deki "your-app" kısmını Koyeb app adınızla değiştirin
+                </p>
+            </div>
 
             <div class="tweet-log">
                 <h2>📜 Tweet Geçmişi</h2>
@@ -224,16 +267,24 @@ def home():
 
 @app.route('/health')
 def health():
+    """Health check endpoint - Koyeb için"""
     return jsonify({
         "status": "healthy",
         "version": VERSION,
-        "last_tweet": last_tweet_time,
-        "is_busy": is_busy,
-        "processed_news": len(tweeted_news_hashes)
+        "uptime": "running",
+        "total_requests": total_requests
     })
+
+@app.route('/ping')
+def ping():
+    """Basit ping endpoint - keep alive için"""
+    global total_requests
+    total_requests += 1
+    return jsonify({"status": "pong", "timestamp": datetime.now().isoformat()})
 
 @app.route('/status')
 def status():
+    """Detaylı durum bilgisi"""
     return jsonify({
         "version": VERSION,
         "last_tweet_time": last_tweet_time,
@@ -241,68 +292,51 @@ def status():
         "is_busy": is_busy,
         "processed_news_count": len(tweeted_news_hashes),
         "recent_titles_count": len(recent_news_titles),
-        "tweet_log": tweet_log
+        "tweet_log": tweet_log,
+        "last_cron_trigger": last_cron_trigger,
+        "total_requests": total_requests
     })
 
-@app.route('/debug-token')
-def debug_token():
+@app.route('/cron', methods=['GET', 'POST'])
+def cron_trigger():
+    """Cron-job.org için özel endpoint"""
+    global is_busy, last_cron_trigger
+    
+    # Secret kontrolü
+    secret = request.args.get('secret') or request.headers.get('X-Cron-Secret')
+    
+    if secret != CRON_SECRET:
+        logger.warning(f"❌ Yetkisiz cron denemesi! IP: {request.remote_addr}")
+        return jsonify({
+            "success": False,
+            "error": "Invalid secret"
+        }), 401
+    
+    if is_busy:
+        logger.info("⏭️ Bot meşgul, cron atlandı")
+        return jsonify({
+            "success": False,
+            "message": "Bot busy, skipped"
+        }), 200
+    
+    # Tetikleme zamanını kaydet
+    last_cron_trigger = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Arka planda tweet işini başlat
+    thread = threading.Thread(target=job, kwargs={"source": "CRON"})
+    thread.start()
+    
+    logger.info(f"⏰ Cron-job tetiklendi! IP: {request.remote_addr}")
+    
     return jsonify({
-        "secret_token_set": bool(SECRET_TOKEN and SECRET_TOKEN != "default_secret_change_this"),
-        "env_vars_loaded": {
-            "X_API_KEY": bool(X_API_KEY),
-            "GROQ_API_KEY": bool(GROQ_API_KEY),
-            "SECRET_TOKEN": bool(SECRET_TOKEN)
-        }
-    })
-
-@app.route('/test-content')
-def test_content():
-    """RSS içeriğini test et - DEBUG için"""
-    try:
-        feed = feedparser.parse(NTV_SON_DAKIKA_RSS)
-        if not feed.entries:
-            return "RSS'den veri alınamadı"
-        
-        first_entry = feed.entries[0]
-        
-        # Content alanını kontrol et
-        content_html = ""
-        if hasattr(first_entry, 'content') and first_entry.content:
-            content_html = first_entry.content[0].get('value', '')
-        
-        summary = first_entry.get('summary', '')
-        description = first_entry.get('description', '')
-        
-        # Temizlenmiş içerik
-        clean = clean_html_content(content_html if content_html else summary)
-        
-        return f"""
-        <html>
-        <head><meta charset="utf-8"></head>
-        <body style="font-family: monospace; padding: 20px;">
-        <h2>İlk Haber - İçerik Test</h2>
-        
-        <h3>Başlık:</h3>
-        <p>{first_entry.get('title', '')}</p>
-        
-        <h3>Content (HTML - {len(content_html)} kar):</h3>
-        <pre style="background: #f0f0f0; padding: 10px; overflow-x: auto;">{content_html[:500]}</pre>
-        
-        <h3>Summary ({len(summary)} kar):</h3>
-        <pre style="background: #f0f0f0; padding: 10px;">{summary[:300]}</pre>
-        
-        <h3>Temizlenmiş İçerik ({len(clean)} kar):</h3>
-        <p style="background: #e8f5e9; padding: 15px; border-left: 4px solid #4caf50;">{clean[:500]}</p>
-        
-        <a href="/" style="display: inline-block; margin-top: 20px; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 5px;">← Ana Sayfa</a>
-        </body>
-        </html>
-        """
-    except Exception as e:
-        return f"Hata: {e}"
+        "success": True,
+        "message": "Tweet job started",
+        "timestamp": last_cron_trigger
+    }), 202
 
 @app.route('/trigger', methods=['POST', 'GET'])
 def trigger_tweet():
+    """Manuel tetikleme endpoint'i"""
     global is_busy
     
     # Token kontrolü
@@ -313,7 +347,7 @@ def trigger_tweet():
     
     if SECRET_TOKEN and SECRET_TOKEN != "default_secret_change_this":
         if token != SECRET_TOKEN:
-            logger.warning(f"Yetkisiz tetikleme! IP: {request.remote_addr}")
+            logger.warning(f"❌ Yetkisiz tetikleme! IP: {request.remote_addr}")
             return """
             <html>
             <body style="font-family: Arial; text-align: center; padding: 50px;">
@@ -333,10 +367,10 @@ def trigger_tweet():
         </html>
         """, 429
     
-    thread = threading.Thread(target=job, kwargs={"manual": True})
+    thread = threading.Thread(target=job, kwargs={"source": "MANUEL"})
     thread.start()
     
-    logger.info(f"Manuel tetikleme! IP: {request.remote_addr}")
+    logger.info(f"👤 Manuel tetikleme! IP: {request.remote_addr}")
     
     if request.method == 'GET':
         return """
@@ -370,7 +404,7 @@ def trigger_tweet():
                 <h1>Tweet İşlemi Başlatıldı!</h1>
                 <p>NTV Son Dakika haberi işleniyor...</p>
                 <p style="color: #999;">~30-60 saniye</p>
-                <a href="/status" style="display: inline-block; margin-top: 20px; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 25px;">📊 Durumu Kontrol Et</a>
+                <a href="/" style="display: inline-block; margin-top: 20px; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 25px;">🏠 Ana Sayfa</a>
             </div>
         </body>
         </html>
@@ -400,13 +434,11 @@ def get_twitter_conn():
 
 # --- HABER HASH OLUŞTUR ---
 def create_news_hash(title, description):
-    """Haberin benzersiz hash'ini oluştur"""
     content = f"{title}|{description}".lower()
     return hashlib.md5(content.encode()).hexdigest()
 
 # --- BENZERLİK KONTROLÜ ---
 def is_similar_to_recent(title, threshold=SIMILARITY_THRESHOLD):
-    """Son tweet'lenen haberlerle benzerlik kontrolü"""
     for recent_title in recent_news_titles:
         ratio = SequenceMatcher(None, title.lower(), recent_title.lower()).ratio()
         if ratio > threshold:
@@ -416,22 +448,17 @@ def is_similar_to_recent(title, threshold=SIMILARITY_THRESHOLD):
 
 # --- HTML TEMİZLEME ---
 def clean_html_content(html_text):
-    """HTML etiketlerini temizle ve düz metin al"""
     import re
-    # HTML etiketlerini kaldır
     text = re.sub(r'<[^>]+>', '', html_text)
-    # Özel karakterleri düzelt
     text = text.replace('&nbsp;', ' ')
     text = text.replace('&quot;', '"')
     text = text.replace('&amp;', '&')
     text = text.replace('&#39;', "'")
-    # Çoklu boşlukları tek boşluğa indir
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
 # --- NTV SON DAKİKA HABERLER ---
 def fetch_ntv_breaking_news():
-    """NTV Son Dakika RSS'den haberleri çek"""
     logger.info("📺 NTV Son Dakika haberleri çekiliyor...")
     
     try:
@@ -442,17 +469,15 @@ def fetch_ntv_breaking_news():
             return []
         
         news_list = []
-        for entry in feed.entries[:15]:  # İlk 15 haber
+        for entry in feed.entries[:15]:
             title = entry.get('title', '').strip()
             
-            # İçerik alanlarını dene (content > summary > description)
             content = ""
             if hasattr(entry, 'content') and entry.content:
                 content = entry.content[0].get('value', '')
             if not content:
                 content = entry.get('summary', entry.get('description', ''))
             
-            # HTML'i temizle
             full_content = clean_html_content(content)
             
             link = entry.get('link', '')
@@ -461,12 +486,11 @@ def fetch_ntv_breaking_news():
             if not title or len(title) < 15:
                 continue
             
-            # Hash için başlık + içerik kullan
             news_hash = create_news_hash(title, full_content[:200])
             
             news_list.append({
                 'title': title,
-                'full_content': full_content,  # TAM İÇERİK
+                'full_content': full_content,
                 'link': link,
                 'pub_date': pub_date,
                 'hash': news_hash
@@ -481,20 +505,15 @@ def fetch_ntv_breaking_news():
 
 # --- TWEET İÇİN HABER SEÇ ---
 def select_untweeted_news(news_list):
-    """Daha önce tweet'lenmemiş haberi seç"""
-    
     for news in news_list:
-        # Hash kontrolü
         if news['hash'] in tweeted_news_hashes:
             logger.info(f"Atlandı (hash): {news['title'][:50]}...")
             continue
         
-        # Benzerlik kontrolü
         if is_similar_to_recent(news['title']):
             logger.info(f"Atlandı (benzer): {news['title'][:50]}...")
             continue
         
-        # Bu haber uygun!
         logger.info(f"✅ Seçildi: {news['title'][:50]}...")
         return news
     
@@ -503,15 +522,11 @@ def select_untweeted_news(news_list):
 
 # --- GROQ İLE TWEET OLUŞTUR ---
 def create_tweet_with_groq(news):
-    """Groq AI ile haberi tweet formatına dönüştür"""
-    
     try:
-        # İçerik varsa onu kullan, yoksa başlık
         content_to_use = news.get('full_content', '')
         if not content_to_use or len(content_to_use) < 50:
             content_to_use = news['title']
         
-        # Çok uzunsa kısalt (Groq'a gönderirken)
         if len(content_to_use) > 2000:
             content_to_use = content_to_use[:2000] + "..."
         
@@ -530,10 +545,6 @@ KURALLAR:
 4. Gereksiz kelime kullanma
 5. Hashtag KULLANMA
 6. Sadece haber özeti yaz, başka hiçbir şey yazma
-7. Kesinlikle hakaret ve küfür içerikli yazılar yazma.
-
-ÖRNEK FORMAT:
-"Ekonomi Bakanı Mehmet Şimşek, enflasyonla mücadele kapsamında yeni teşvik paketini açıkladı. Pakette KOBİ'lere 5 milyar TL destek, ihracatçılara vergi indirimi ve tarım sektörüne ucuz kredi imkanı yer alıyor. Paket 1 Şubat'ta yürürlüğe girecek."
 """
         
         completion = client_ai.chat.completions.create(
@@ -544,9 +555,7 @@ KURALLAR:
                     "content": """Sen profesyonel bir haber editörüsün. 
 Haberleri 280 karakterlik tweet formatında özetliyorsun.
 Her karakteri verimli kullan, gereksiz kelime ekleme.
-Somut bilgileri (sayı, isim, yer) mutlaka ekle.
-Okuyucu haberin tüm önemli detaylarını anlamalı.
-Kesinlikle hakaret ve küfür içerikli yazılar yazma."""
+Somut bilgileri (sayı, isim, yer) mutlaka ekle."""
                 },
                 {
                     "role": "user",
@@ -558,21 +567,16 @@ Kesinlikle hakaret ve küfür içerikli yazılar yazma."""
         )
         
         tweet_text = completion.choices[0].message.content.strip()
-        
-        # Tırnak işaretlerini kaldır (bazen AI tırnak içinde yazar)
         tweet_text = tweet_text.strip('"').strip("'")
         
-        # Karakter limiti kontrolü - SERT
         if len(tweet_text) > 280:
             logger.warning(f"Tweet çok uzun ({len(tweet_text)} kar), kısaltılıyor...")
-            # Cümle sonunda kes
             tweet_text = tweet_text[:277].rsplit('.', 1)[0] + '...'
-            # Eğer hala uzunsa, zorla kes
             if len(tweet_text) > 280:
                 tweet_text = tweet_text[:277] + '...'
         
         char_count = len(tweet_text)
-        logger.info(f"✅ Tweet oluşturuldu ({char_count} karakter): {tweet_text[:60]}...")
+        logger.info(f"✅ Tweet oluşturuldu ({char_count} karakter)")
         
         return tweet_text
         
@@ -581,7 +585,7 @@ Kesinlikle hakaret ve küfür içerikli yazılar yazma."""
         return None
 
 # --- ANA GÖREV FONKSİYONU ---
-def job(manual=False):
+def job(source="MANUEL"):
     global last_news_summary, last_tweet_time, is_busy, tweeted_news_hashes, recent_news_titles, tweet_log
     
     if is_busy:
@@ -589,31 +593,26 @@ def job(manual=False):
         return
     
     is_busy = True
-    trigger_type = "MANUEL" if manual else "OTOMATİK"
     
     try:
         logger.info("=" * 60)
-        logger.info(f"{trigger_type} GÖREV BAŞLATILDI: {datetime.now()}")
+        logger.info(f"{source} GÖREV BAŞLATILDI: {datetime.now()}")
         
-        # 1. NTV haberlerini çek
         news_list = fetch_ntv_breaking_news()
         if not news_list:
             logger.error("Haber alınamadı, görev iptal")
             return
         
-        # 2. Tweet'lenmemiş haber seç
         selected_news = select_untweeted_news(news_list)
         if not selected_news:
             logger.error("Uygun haber bulunamadı")
             return
         
-        # 3. Groq ile tweet oluştur
         tweet_text = create_tweet_with_groq(selected_news)
         if not tweet_text:
             logger.error("Tweet oluşturulamadı")
             return
         
-        # 4. Twitter'a gönder
         client = get_twitter_conn()
         if not client:
             logger.error("Twitter bağlantısı kurulamadı")
@@ -621,21 +620,17 @@ def job(manual=False):
         
         response = client.create_tweet(text=tweet_text)
         
-        # 5. Başarılı! Kayıtları güncelle
         tweeted_news_hashes.add(selected_news['hash'])
         recent_news_titles.append(selected_news['title'])
         
-        # Son 20 başlığı tut
         if len(recent_news_titles) > 20:
             recent_news_titles.pop(0)
         
-        # Tweet log'una ekle
         tweet_log.append({
             'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'tweet': tweet_text
         })
         
-        # Son 10 tweet'i tut
         if len(tweet_log) > 10:
             tweet_log.pop(0)
         
@@ -643,9 +638,8 @@ def job(manual=False):
         last_tweet_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         logger.info("=" * 60)
-        logger.info(f"✅ {trigger_type} TWEET GÖNDERİLDİ!")
+        logger.info(f"✅ {source} TWEET GÖNDERİLDİ!")
         logger.info(f"📰 Haber: {selected_news['title'][:60]}...")
-        logger.info(f"📝 İçerik uzunluğu: {len(selected_news.get('full_content', ''))} karakter")
         logger.info(f"🐦 Tweet ({len(tweet_text)} kar): {tweet_text}")
         logger.info("=" * 60)
         
@@ -665,7 +659,7 @@ def run_web_server():
 # --- ANA PROGRAM ---
 if __name__ == "__main__":
     logger.info("=" * 60)
-    logger.info("SİSTEM BAŞLATILIYOR")
+    logger.info("SİSTEM BAŞLATILIYOR - CRON MODE")
     logger.info("=" * 60)
     
     # API key kontrolü
@@ -674,25 +668,9 @@ if __name__ == "__main__":
         logger.critical("Eksik API anahtarları!")
         exit(1)
     
-    # Web sunucusu
-    web_thread = threading.Thread(target=run_web_server, daemon=True)
-    web_thread.start()
-    logger.info("✅ Web sunucusu başlatıldı (port 8000)")
+    logger.info("✅ Bot Cron-Job modunda çalışıyor")
+    logger.info(f"⏰ Cron endpoint: /cron?secret={CRON_SECRET}")
+    logger.info("📍 Web sunucusu başlatılıyor...")
     
-    # İlk görev
-    logger.info("🚀 İlk görev çalıştırılıyor...")
-    job()
-    
-    # Zamanlanmış görevler - 1 SAAT
-    schedule.every(1).hour.do(job)
-    logger.info("⏰ Bot 1 saatlik döngüye alındı")
-    
-    try:
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Bot durduruldu")
-    except Exception as e:
-        logger.critical(f"Kritik hata: {e}")
-        raise
+    # Sadece web sunucusu çalıştır (schedule yok!)
+    run_web_server()
