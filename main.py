@@ -238,49 +238,43 @@ def clean_html_content(html_text):
     text = text.replace('&nbsp;', ' ').replace('&quot;', '"').replace('&amp;', '&').replace('&#39;', "'")
     return re.sub(r'\s+', ' ', text).strip()
 
-# --- HABER ÇEKME (DÜZELTİLDİ) ---
+# --- HABER ÇEKME (V4 - 640x360 FORMATI) ---
 def fetch_ntv_breaking_news():
-    logger.info("📺 RSS taranıyor...")
+    logger.info("📺 RSS taranıyor (img640x360 öncelikli)...")
     try:
-        feed = feedparser.parse(MYNET_SON_DAKIKA_RSS)
-        if not feed.entries: return []
+        # User-agent önemli, bazen botları engelliyorlar
+        feed = feedparser.parse(MYNET_SON_DAKIKA_RSS, agent="Mozilla/5.0")
+        
+        if not feed.entries:
+            logger.error("❌ RSS içeriği boş geldi!")
+            return []
         
         news_list = []
         for entry in feed.entries[:15]:
             title = entry.get('title', '').strip()
-            content = clean_html_content(entry.get('summary', ''))
             
-            # --- RESİM URL ÇEKME ---
+            # İçerik temizleme
+            raw_summary = entry.get('summary', '')
+            raw_desc = entry.get('description', '')
+            full_html = raw_summary + " " + raw_desc
+            content = clean_html_content(full_html)
+            
+            # --- RESİM ARAMA STRATEJİSİ ---
             image_url = None
-            # 1. Yöntem: Media Content (Genelde Mynet burayı kullanır)
-            if 'media_content' in entry and len(entry.media_content) > 0:
-                image_url = entry.media_content[0]['url']
-            # 2. Yöntem: Links (RSS standartı)
-            elif 'links' in entry:
-                for link in entry.links:
-                    if 'image' in link.get('type', ''):
-                        image_url = link['href']
-                        break
-            # 3. Yöntem: Description içindeki img tag'i (Regex ile)
-            if not image_url and 'summary' in entry:
-                import re
-                img_match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
-                if img_match:
-                    image_url = img_match.group(1)
-
-            if not title or len(title) < 15: continue
             
-            news_list.append({
-                'title': title,
-                'full_content': content,
-                'link': entry.get('link', ''),
-                'image_url': image_url, # Artık resim URL'i var
-                'hash': create_news_hash(title, content[:200])
-            })
-        return news_list
-    except Exception as e:
-        logger.error(f"RSS hatası: {e}")
-        return []
+            # 1. EN İYİ SEÇENEK: Sizin bulduğunuz 640x360 etiketi
+            # Bu, Twitter için mükemmel bir 16:9 orandır.
+            if 'img640x360' in entry:
+                image_url = entry.img640x360
+                logger.info(f"🎯 640x360 Resim Bulundu: {title[:15]}...")
+
+            # 2. YEDEK SEÇENEK: Eğer 640x360 yoksa 300x300'e bak
+            elif 'img300x300' in entry:
+                image_url = entry.img300x300
+                # Yine de şansımızı deneyip bunu büyütmeyi deneyebiliriz
+                if image_url and "300x300" in image_url:
+                    image_url = image_url.replace("300x300", "640xauto")
+                logger.info(f"🔎 300x300 Resim Bulundu (Yedek): {title[:15
 
 def select_untweeted_news(news_list):
     suitable = [n for n in news_list if n['hash'] not in tweeted_news_hashes]
