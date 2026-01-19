@@ -35,7 +35,7 @@ SECRET_TOKEN = os.getenv("SECRET_TOKEN", "default_secret_change_this")
 CRON_SECRET = os.getenv("CRON_SECRET", SECRET_TOKEN)  # Cron için ayrı token
 
 # NTV Son Dakika RSS
-NTV_SON_DAKIKA_RSS = "https://www.ntv.com.tr/son-dakika.rss"
+MYNET_SON_DAKIKA_RSS = "https://www.mynet.com/haber/rss/sondakika"
 
 SIMILARITY_THRESHOLD = 0.75
 MAX_RETRIES = 3
@@ -218,7 +218,7 @@ def home():
             <div class="info-grid">
                 <div class="info-card">
                     <h3>📌 Versiyon</h3>
-                    <p>13.0</p>
+                    <p>13.1</p>
                 </div>
                 <div class="info-card">
                     <h3>🕐 Son Tweet</h3>
@@ -229,8 +229,8 @@ def home():
                     <p>{len(tweeted_news_hashes)} adet</p>
                 </div>
                 <div class="info-card">
-                    <h3>⏰ Son Cron</h3>
-                    <p style="font-size: 13px;">{last_cron_trigger}</p>
+                    <h3>📰 Kaynak</h3>
+                    <p style="font-size: 13px;">Mynet</p>
                 </div>
             </div>
 
@@ -252,6 +252,7 @@ def home():
                     <strong>Enabled:</strong> ✅ Aktif
                 </div>
                 <p style="color: #666; font-size: 13px; margin-top: 10px;">
+                    💡 <strong>Kaynak:</strong> Mynet Son Dakika RSS<br>
                     💡 <strong>İpucu:</strong> URL'deki "your-app" kısmını Koyeb app adınızla değiştirin
                 </p>
             </div>
@@ -402,7 +403,7 @@ def trigger_tweet():
             <div class="container">
                 <div class="success-icon">✅</div>
                 <h1>Tweet İşlemi Başlatıldı!</h1>
-                <p>NTV Son Dakika haberi işleniyor...</p>
+                <p>Mynet Son Dakika haberi işleniyor...</p>
                 <p style="color: #999;">~30-60 saniye</p>
                 <a href="/" style="display: inline-block; margin-top: 20px; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 25px;">🏠 Ana Sayfa</a>
             </div>
